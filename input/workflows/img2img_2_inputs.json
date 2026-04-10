@@ -1,0 +1,271 @@
+{
+  "6": {
+    "inputs": {
+      "text": "Use the exact same woman from the reference image. Preserve her identity precisely — same face, facial features, skin tone, hairstyle, and natural expression.\n\nKeep the original background from the reference image unchanged. Do not modify or replace the environment — maintain the same location, perspective, and architectural details exactly as in the original image.\n\nThe woman is walking naturally in the same scene, with a relaxed, confident posture and slight forward motion, mid-step. Her pose is realistic and elegant.\n\nShe is holding exactly one large soft brown leather handbag in her right hand. Only one bag is present.\n\nThe handbag is a luxury Fendi-style leather bag, made of high-quality smooth brown leather, with natural folds and soft structure. The material should appear premium, slightly matte with subtle highlights, showing realistic leather texture and stitching.\n\nThe Fendi logo is clearly visible and preserved exactly as in the reference bag — centered, clean, and not distorted. Maintain the original design, proportions, and structure of the bag without alteration.\n\nThe bag is realistically integrated, correctly scaled, with natural grip and weight. It interacts naturally with her hand and arm, with slight tension and realistic positioning.\n\nLighting must remain consistent with the original image — same direction, intensity, and shadows. Ensure realistic shadows on her body and the bag.\n\nHer feet must be properly grounded on the existing surface with subtle contact shadows.\n\nShot on a Canon DSLR, 50mm lens — subject in sharp focus, background slightly blurred but still recognizable (natural depth of field).\n\nPreserve natural skin texture with fine detail, avoid overly smooth or plastic appearance.\n\nUltra-realistic, seamless integration — no cutout or pasted look, correct anatomy, correct proportions, correct perspective.\n\nThe woman has only one handbag, held in her right hand.\n\nKeep the woman as close as possible to the one in the photo provided.",
+      "clip": [
+        "195",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "163": {
+    "inputs": {
+      "seed": 2,
+      "steps": 7,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "194",
+        0
+      ],
+      "positive": [
+        "210",
+        0
+      ],
+      "negative": [
+        "209",
+        0
+      ],
+      "latent_image": [
+        "197",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "164": {
+    "inputs": {
+      "samples": [
+        "163",
+        0
+      ],
+      "vae": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "190": {
+    "inputs": {
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "194": {
+    "inputs": {
+      "unet_name": "flux-2-klein-4b-fp8.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "195": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "196": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "197": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "198": {
+    "inputs": {
+      "image": "Screenshot 2026-04-09 at 17.10.35.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "199": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 0.5,
+      "resolution_steps": 1,
+      "image": [
+        "198",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "ImageScaleToTotalPixels"
+    }
+  },
+  "203": {
+    "inputs": {
+      "filename_prefix": "img",
+      "images": [
+        "164",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "204": {
+    "inputs": {
+      "conditioning": [
+        "6",
+        0
+      ],
+      "latent": [
+        "206",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent"
+    }
+  },
+  "205": {
+    "inputs": {
+      "conditioning": [
+        "190",
+        0
+      ],
+      "latent": [
+        "206",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent"
+    }
+  },
+  "206": {
+    "inputs": {
+      "pixels": [
+        "199",
+        0
+      ],
+      "vae": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "209": {
+    "inputs": {
+      "conditioning": [
+        "205",
+        0
+      ],
+      "latent": [
+        "211",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent"
+    }
+  },
+  "210": {
+    "inputs": {
+      "conditioning": [
+        "204",
+        0
+      ],
+      "latent": [
+        "211",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent"
+    }
+  },
+  "211": {
+    "inputs": {
+      "pixels": [
+        "212",
+        0
+      ],
+      "vae": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "212": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 0.5,
+      "resolution_steps": 1,
+      "image": [
+        "213",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "ImageScaleToTotalPixels"
+    }
+  },
+  "213": {
+    "inputs": {
+      "image": "Screenshot 2026-04-08 at 14.10.17.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "default_server": "remote",
+  "servers": {
+    "remote": {
+      "url": "http://YOUR_COMFY_SERVER_IP",
+      "auth": {
+        "header_name": "Authorization",
+        "scheme": "Bearer",
+        "token": "YOUR_TOKEN_HERE"
+      },
+      "timeout": {
+        "start_seconds": 300,
+        "submit_seconds": 600
+      }
+    }
+  }
+}
