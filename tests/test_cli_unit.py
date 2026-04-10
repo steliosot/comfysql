@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -26,6 +27,27 @@ def test_state_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert loaded.pid == 1234
     assert loaded.host == "127.0.0.1"
     assert loaded.port == 8188
+
+
+def test_build_connection_settings_resolves_host_alias_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_workspace(tmp_path)
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda: tmp_path)
+    monkeypatch.delenv("COMFY_URL", raising=False)
+    cfg = {
+        "version": 1,
+        "default_server": "localhost",
+        "servers": {
+            "localhost": {"url": "http://127.0.0.1:8188"},
+            "remote": {"url": "http://34.132.147.127:80"},
+        },
+    }
+    (tmp_path / "comfy-agent.json").write_text(json.dumps(cfg), encoding="utf-8")
+    args = argparse.Namespace(server="", host="remote", port=8188, config=None)
+
+    settings = cli._build_connection_settings(args)
+    assert settings.host == "34.132.147.127"
+    assert settings.port == 80
+    assert settings.scheme == "http"
 
 
 def test_ensure_server_running_starts_when_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:

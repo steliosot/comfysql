@@ -123,6 +123,7 @@ def _build_connection_settings(args: argparse.Namespace) -> ConnectionSettings:
     requested_server_name = str(getattr(args, "server", "") or "").strip()
 
     selected_server_cfg: dict[str, Any] = {}
+    host_alias_selected = False
     if requested_server_name:
         if not servers_cfg:
             raise CliError(
@@ -137,10 +138,17 @@ def _build_connection_settings(args: argparse.Namespace) -> ConnectionSettings:
                 exit_code=2,
             )
         selected_server_cfg = raw
-    elif default_server_name and isinstance(servers_cfg.get(default_server_name), dict):
-        selected_server_cfg = servers_cfg[default_server_name]
-    elif isinstance(server_cfg, dict):
-        selected_server_cfg = server_cfg
+    else:
+        cli_host_candidate = str(getattr(args, "host", DEFAULT_HOST) or "").strip()
+        alias_candidate = cli_host_candidate.split(":", 1)[0].strip()
+        maybe_alias_cfg = servers_cfg.get(alias_candidate)
+        if alias_candidate and isinstance(maybe_alias_cfg, dict):
+            selected_server_cfg = maybe_alias_cfg
+            host_alias_selected = True
+        elif default_server_name and isinstance(servers_cfg.get(default_server_name), dict):
+            selected_server_cfg = servers_cfg[default_server_name]
+        elif isinstance(server_cfg, dict):
+            selected_server_cfg = server_cfg
 
     auth_cfg = selected_server_cfg.get("auth", {}) if isinstance(selected_server_cfg.get("auth"), dict) else {}
     timeout_cfg = selected_server_cfg.get("timeout", {}) if isinstance(selected_server_cfg.get("timeout"), dict) else {}
@@ -157,7 +165,7 @@ def _build_connection_settings(args: argparse.Namespace) -> ConnectionSettings:
     host = cli_host
     port = cli_port
 
-    if resolved_url and using_cli_defaults:
+    if resolved_url and (using_cli_defaults or host_alias_selected):
         parsed_scheme, parsed_host, parsed_port = _parse_url(resolved_url)
         scheme, host, port = parsed_scheme, parsed_host, parsed_port
 

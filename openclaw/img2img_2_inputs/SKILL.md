@@ -13,7 +13,7 @@ Use this skill when a workflow combines two image references plus prompt guidanc
 
 - `comfy-agent` is installed.
 - SQL workflow table exists:
-  - `CREATE TABLE img2img_2_inputs AS WORKFLOW '/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_2_inputs.json';`
+  - `CREATE TABLE img2img_2_inputs AS WORKFLOW '${REPO_ROOT}/input/workflows/img2img_2_inputs.json';`
 - Preset exists (recommended): `default_run`.
 
 ## Execution
@@ -28,3 +28,19 @@ Run the SQL examples in:
 - Validation summary is printed.
 - Output is generated according to your SQL output mode/download settings.
 
+
+## Output Contract
+
+On success, return:
+
+- `status`: `success`
+- `errors`: `[]`
+- `artifacts`: list of relevant files/ids/summary rows produced by the run
+- `next_step`: one concrete recommended next action
+
+On failure, return:
+
+- `status`: `error`
+- `errors`: non-empty list of actionable error messages
+- `artifacts`: any partial outputs generated before failure
+- `next_step`: one concrete fix command to retry safely

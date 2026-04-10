@@ -1028,6 +1028,29 @@ class LocalComfySQLEngine:
         if isinstance(query, CreateWorkflowTableQuery):
             resolved = self._resolve_workflow_path(query.workflow_path)
             prompt = self._load_workflow_as_api_prompt(resolved)
+            upload_report = None
+            if not compile_only:
+                mode = (upload_mode or "strict").lower()
+                if mode not in {"strict", "warn", "off"}:
+                    raise SQLEngineError("Invalid upload_mode. Use one of: strict, warn, off.", exit_code=2)
+                if mode != "off":
+                    prompt, upload_report = self._auto_upload_local_assets(prompt, timeout=timeout)
+                    print(
+                        f"upload_preflight uploaded={upload_report['uploaded_count']} "
+                        f"skipped_existing={upload_report['skipped_existing_count']} "
+                        f"failed={upload_report['failed_count']}",
+                        flush=True,
+                    )
+                    if upload_report["failed_count"] > 0:
+                        for item in upload_report.get("failed", []):
+                            print(
+                                f"- upload_failed local={item.get('local_path')} remote={item.get('remote_path')} "
+                                f"error={item.get('error')}",
+                                flush=True,
+                            )
+                        if mode == "strict":
+                            raise SQLEngineError("Upload preflight failed; aborting workflow create.", exit_code=4)
+            prompt = self._normalize_prompt_asset_paths(prompt)
             validation = self._validate_compiled_prompt(prompt)
             default_params = self._extract_workflow_default_params(prompt)
             kind = str(getattr(query, "kind", "workflow") or "workflow").lower()
@@ -1040,7 +1063,7 @@ class LocalComfySQLEngine:
                 default_params=default_params,
                 meta=self._extract_workflow_meta(resolved),
             )
-            return {
+            result = {
                 "action": "create_template" if kind == "template" else "create_table",
                 "table": spec.table,
                 "workflow_path": spec.workflow_path,
@@ -1049,6 +1072,9 @@ class LocalComfySQLEngine:
                 "meta": spec.meta or {},
                 "validation": validation,
             }
+            if isinstance(upload_report, dict):
+                result["upload_preflight"] = upload_report
+            return result
 
         if isinstance(query, DropTableQuery):
             dropped = self.registry.drop_table(query.table_name)

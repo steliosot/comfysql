@@ -1,6 +1,7 @@
 -- comfysql_query_ops read-only command pack
 -- Run:
--- comfy-agent sql remote --sql-file /Users/stelios/Downloads/ComfyUI-custom/openclaw/comfysql_query_ops/comfysql_query_ops.sql
+-- REPO_ROOT="$(cd "$(dirname "$0")"/../.. && pwd)"
+-- comfy-agent sql remote --sql-file "${REPO_ROOT}/openclaw/comfysql_query_ops/comfysql_query_ops.sql"
 
 -- 1) inventory
 SHOW TABLES;

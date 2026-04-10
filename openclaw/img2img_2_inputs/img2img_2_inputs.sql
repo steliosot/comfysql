@@ -1,6 +1,13 @@
 -- img2img_2_inputs sample commands
 -- Run:
--- comfy-agent sql remote --sql-file /Users/stelios/Downloads/ComfyUI-custom/openclaw/img2img_2_inputs/img2img_2_inputs.sql
+-- REPO_ROOT="$(cd "$(dirname "$0")"/../.. && pwd)"
+-- comfy-agent sql remote --sql-file "${REPO_ROOT}/openclaw/img2img_2_inputs/img2img_2_inputs.sql"
+
+-- prechecks (fail fast)
+DESCRIBE WORKFLOW img2img_2_inputs;
+DESCRIBE PRESET default_run FOR img2img_2_inputs;
+DESCRIBE PROFILE standard_50mm;
+DESCRIBE PROFILE dramatic_low_angle;
 
 -- compile-only dry run
 EXPLAIN SELECT image FROM img2img_2_inputs
@@ -15,4 +22,3 @@ USING default_run
 PROFILE dramatic_low_angle
 WHERE prompt='dramatic cinematic portrait, preserve the same woman and realistic handbag integration'
   AND seed=3302;
-

@@ -13,7 +13,7 @@ Use this skill when you want to transform a single reference image with prompt g
 
 - `comfy-agent` is installed.
 - SQL workflow table exists:
-  - `CREATE TABLE img2img_reference AS WORKFLOW '/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_reference.json';`
+  - `CREATE TABLE img2img_reference AS WORKFLOW '${REPO_ROOT}/input/workflows/img2img_reference.json';`
 - Preset exists (recommended): `default_run`.
 
 ## Execution
@@ -28,3 +28,19 @@ Run the SQL examples in:
 - `validated ...` line appears before execution.
 - Generated artifact is available through configured output behavior.
 
+
+## Output Contract
+
+On success, return:
+
+- `status`: `success`
+- `errors`: `[]`
+- `artifacts`: list of relevant files/ids/summary rows produced by the run
+- `next_step`: one concrete recommended next action
+
+On failure, return:
+
+- `status`: `error`
+- `errors`: non-empty list of actionable error messages
+- `artifacts`: any partial outputs generated before failure
+- `next_step`: one concrete fix command to retry safely

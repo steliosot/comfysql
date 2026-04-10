@@ -320,6 +320,75 @@ def test_create_table_runs_validation_before_register(monkeypatch: pytest.Monkey
     assert engine.registry.get("demo") is not None
 
 
+def test_create_table_runs_asset_upload_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_create_upload.json"
+    wf.write_text(
+        json.dumps(
+            {
+                "1": {"class_type": "LoadImage", "inputs": {"image": "woman.jpg"}},
+                "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0], "filename_prefix": "x"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    seen = {"upload_called": 0}
+
+    def _fake_upload(prompt: dict[str, object], *, timeout: float) -> tuple[dict[str, object], dict[str, object]]:
+        seen["upload_called"] += 1
+        patched = dict(prompt)
+        patched["1"] = dict(patched["1"])  # type: ignore[index]
+        patched["1"]["inputs"] = {"image": "assets/woman.jpg"}  # type: ignore[index]
+        return patched, {"uploaded_count": 1, "skipped_existing_count": 0, "failed_count": 0}
+
+    monkeypatch.setattr(engine, "_auto_upload_local_assets", _fake_upload)
+    monkeypatch.setattr(
+        engine,
+        "_validate_compiled_prompt",
+        lambda prompt: {"nodes": 2, "edges": 1, "checked_models": [], "checked_assets": []},
+    )
+
+    result = engine.execute_sql(
+        f"CREATE TABLE demo_upload AS WORKFLOW '{wf}';",
+        compile_only=False,
+        no_cache=False,
+        timeout=30.0,
+        statement_index=1,
+    )
+    assert result["action"] == "create_table"
+    assert seen["upload_called"] == 1
+    assert isinstance(result.get("upload_preflight"), dict)
+    assert result["upload_preflight"]["uploaded_count"] == 1
+
+
+def test_create_table_strict_upload_failure_blocks_register(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_create_upload_fail.json"
+    wf.write_text(
+        json.dumps({"1": {"class_type": "LoadImage", "inputs": {"image": "woman.jpg"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_auto_upload_local_assets",
+        lambda prompt, timeout: (prompt, {"uploaded_count": 0, "skipped_existing_count": 0, "failed_count": 1, "failed": []}),
+    )
+
+    with pytest.raises(SQLEngineError, match="Upload preflight failed; aborting workflow create."):
+        engine.execute_sql(
+            f"CREATE TABLE demo_upload_fail AS WORKFLOW '{wf}';",
+            compile_only=False,
+            no_cache=False,
+            timeout=30.0,
+            statement_index=1,
+            upload_mode="strict",
+        )
+
+    assert engine.registry.get("demo_upload_fail") is None
+
+
 def test_create_template_captures_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     engine = _make_engine(tmp_path)
     wf = tmp_path / "wf_template.json"
