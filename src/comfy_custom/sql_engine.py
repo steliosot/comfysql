@@ -923,6 +923,8 @@ class LocalComfySQLEngine:
                     "workflow_path": spec.workflow_path,
                     "default_params": spec.default_params or {},
                     "has_meta": bool(spec.meta),
+                    "intent": self._workflow_intent(spec.meta or {}),
+                    "signature": self._workflow_signature(spec.meta or {}),
                 }
                 for spec in self.registry.list()
             )
@@ -2132,6 +2134,32 @@ class LocalComfySQLEngine:
             return {}
         value = raw.get("meta")
         return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _workflow_intent(meta: dict[str, Any]) -> str:
+        value = meta.get("intent")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return "-"
+
+    @staticmethod
+    def _workflow_signature(meta: dict[str, Any]) -> str:
+        explicit = meta.get("signature")
+        if isinstance(explicit, str) and explicit.strip():
+            return explicit.strip()
+
+        capabilities = meta.get("capabilities")
+        if isinstance(capabilities, list):
+            parts = [str(x).strip() for x in capabilities if str(x).strip()]
+            if parts:
+                return "+".join(parts[:3])
+
+        semantics = meta.get("input_semantics")
+        if isinstance(semantics, dict):
+            keys = [str(k).strip() for k in semantics.keys() if str(k).strip()]
+            if keys:
+                return "+".join(keys[:3])
+        return "-"
 
     def _ui_workflow_to_api_prompt(self, workflow: dict[str, Any]) -> dict[str, Any]:
         schema = self._load_schema()

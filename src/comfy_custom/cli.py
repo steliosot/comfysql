@@ -1003,7 +1003,7 @@ def _render_sql_result(result: dict[str, Any], table_filter: str = "all") -> Non
             if workflows:
                 for row in workflows:
                     print(
-                        f"- {row.get('table')} (workflow_path={row.get('workflow_path')}, has_meta={bool(row.get('has_meta'))})",
+                        f"- {row.get('table')} (intent={row.get('intent', '-')}, signature={row.get('signature', '-')})",
                         flush=True,
                     )
             else:
@@ -1166,12 +1166,12 @@ def _render_sql_result_styled(result: dict[str, Any], table_filter: str, ui: Ter
         if table_filter in {"all", "workflows"}:
             ui.print_table(
                 "WORKFLOWS",
-                ["name", "workflow_path", "has_meta"],
+                ["name", "intent", "signature"],
                 [
                     [
                         str(r.get("table", "")),
-                        str(r.get("workflow_path", "")),
-                        str(bool(r.get("has_meta"))).lower(),
+                        str(r.get("intent", "-")),
+                        str(r.get("signature", "-")),
                     ]
                     for r in workflows
                 ],
