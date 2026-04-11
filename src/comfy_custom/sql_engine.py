@@ -101,11 +101,68 @@ class QueryMacroSpec:
 
 
 class WorkflowRegistry:
-    def __init__(self, registry_path: Path) -> None:
+    def __init__(self, registry_path: Path, workspace_root: Path | None = None) -> None:
         self.registry_path = registry_path
+        if workspace_root is not None:
+            self.workspace_root = workspace_root.resolve()
+        elif registry_path.parent.name == ".state":
+            self.workspace_root = registry_path.parent.parent.resolve()
+        else:
+            self.workspace_root = registry_path.parent.resolve()
         self._tables: dict[str, WorkflowTableSpec] = {}
         self._loaded = False
         self._migrated = False
+
+    def _workspace_relative(self, path: Path) -> str | None:
+        try:
+            return path.resolve().relative_to(self.workspace_root).as_posix()
+        except Exception:
+            return None
+
+    def _canonical_store_path(self, workflow_path: str | Path) -> str:
+        raw = str(workflow_path).strip()
+        if not raw:
+            return raw
+        # Accept "/input/..." as repo-root shorthand and normalize to "input/...".
+        if raw.startswith("/input/"):
+            raw = raw[1:]
+        p = Path(raw).expanduser()
+        if p.is_absolute():
+            rel = self._workspace_relative(p)
+            return rel if rel else p.resolve().as_posix()
+        # Persist repo-root relative, not cwd-relative.
+        return Path(raw).as_posix()
+
+    def _recover_path_by_basename(self, raw_path: str) -> str | None:
+        name = Path(raw_path).name
+        if not name:
+            return None
+        preferred = (self.workspace_root / "input" / "workflows" / name).resolve()
+        if preferred.exists():
+            rel = self._workspace_relative(preferred)
+            if rel:
+                return rel
+        managed = (self.workspace_root / ".state" / "workflows" / name).resolve()
+        if managed.exists():
+            rel = self._workspace_relative(managed)
+            if rel:
+                return rel
+        return None
+
+    def _migrate_loaded_workflow_path(self, workflow_path: str) -> tuple[str, bool]:
+        original = str(workflow_path).strip()
+        if not original:
+            return original, False
+
+        normalized = self._canonical_store_path(original)
+        candidate = self.workspace_root / normalized if not Path(normalized).is_absolute() else Path(normalized)
+        if candidate.exists():
+            return normalized, normalized != original
+
+        recovered = self._recover_path_by_basename(original)
+        if recovered:
+            return recovered, recovered != original
+        return normalized, normalized != original
 
     def load(self) -> None:
         if self._loaded:
@@ -132,9 +189,12 @@ class WorkflowRegistry:
                 for table, payload in tables_payload.items():
                     if not isinstance(payload, dict):
                         continue
+                    migrated_path, changed = self._migrate_loaded_workflow_path(str(payload.get("workflow_path", "")))
+                    if changed:
+                        self._migrated = True
                     self._tables[table.lower()] = WorkflowTableSpec(
                         table=str(table),
-                        workflow_path=str(payload.get("workflow_path", "")),
+                        workflow_path=migrated_path,
                         created_at=float(payload.get("created_at", 0.0)),
                         kind=str(payload.get("kind", "workflow") or "workflow").lower(),
                         default_params=dict(payload.get("default_params", {}))
@@ -153,9 +213,12 @@ class WorkflowRegistry:
                     workflow_path = str(row.get("workflow_path", "")).strip()
                     if not table or not workflow_path:
                         continue
+                    migrated_path, changed = self._migrate_loaded_workflow_path(workflow_path)
+                    if changed:
+                        self._migrated = True
                     self._tables[table.lower()] = WorkflowTableSpec(
                         table=table,
-                        workflow_path=workflow_path,
+                        workflow_path=migrated_path,
                         created_at=float(row.get("created_at", 0.0)),
                         kind=str(row.get("kind", "workflow") or "workflow").lower(),
                         default_params=dict(row.get("default_params", {}))
@@ -201,7 +264,7 @@ class WorkflowRegistry:
         key = table.lower()
         spec = WorkflowTableSpec(
             table=table,
-            workflow_path=str(workflow_path),
+            workflow_path=self._canonical_store_path(workflow_path),
             created_at=time.time(),
             kind=(kind or "workflow").lower(),
             default_params=dict(default_params or {}),
@@ -1012,13 +1075,14 @@ class LocalComfySQLEngine:
     ) -> None:
         self.comfy_dir = comfy_dir
         self.state_dir = state_dir
+        self.workspace_root = state_dir.parent.resolve() if state_dir.name == ".state" else state_dir.resolve()
         self.host = host
         self.port = port
         self.scheme = scheme
         self._ensure_server_running = ensure_server_running
         self._validate_api_prompt_shape = validate_api_prompt
         self._submit_api_prompt = submit_api_prompt
-        self.registry = WorkflowRegistry(state_dir / "sql_registry.json")
+        self.registry = WorkflowRegistry(state_dir / "sql_registry.json", workspace_root=self.workspace_root)
         self.preset_registry = PresetRegistry(state_dir / "sql_presets.json")
         self.profile_registry = ProfileRegistry(state_dir / "sql_profiles.json")
         self.character_binding_registry = CharacterBindingRegistry(state_dir / "sql_character_bindings.json")
@@ -1350,14 +1414,36 @@ class LocalComfySQLEngine:
         return self._schema_store_obj().refresh()
 
     def _resolve_workflow_path(self, raw_path: str) -> Path:
-        p = Path(raw_path).expanduser()
+        text = str(raw_path or "").strip()
+        if not text:
+            raise SQLEngineError("Workflow path cannot be empty.", exit_code=2)
+        # Accept "/input/..." shorthand and map it to workspace-root relative path.
+        if text.startswith("/input/"):
+            text = text[1:]
+
+        p = Path(text).expanduser()
         if p.is_absolute():
             resolved = p.resolve()
         else:
-            resolved = (Path.cwd() / p).resolve()
-        if not resolved.exists():
-            raise SQLEngineError(f"Workflow file not found: {resolved}", exit_code=2)
-        return resolved
+            resolved = (self.workspace_root / p).resolve()
+        if resolved.exists():
+            return resolved
+
+        fallback = (self.workspace_root / "input" / "workflows" / Path(text).name).resolve()
+        if fallback.exists():
+            return fallback
+        managed_fallback = (self.state_dir / "workflows" / Path(text).name).resolve()
+        if managed_fallback.exists():
+            return managed_fallback
+
+        raise SQLEngineError(
+            f"Workflow file not found for '{raw_path}'. "
+            f"Recreate the table with: CREATE TABLE <name> AS WORKFLOW 'input/workflows/{Path(text).name}';",
+            exit_code=2,
+        )
+
+    def _workflow_path_for_spec(self, spec: WorkflowTableSpec) -> Path:
+        return self._resolve_workflow_path(spec.workflow_path)
 
     def _managed_workflows_dir(self) -> Path:
         path = (self.state_dir / "workflows").resolve()
@@ -1557,7 +1643,7 @@ class LocalComfySQLEngine:
             table_spec = self.registry.get(query.workflow_table)
             if table_spec is None:
                 raise SQLEngineError(f"Workflow table '{query.workflow_table}' does not exist.", exit_code=2)
-            prompt = self._load_workflow_as_api_prompt(Path(table_spec.workflow_path))
+            prompt = self._load_workflow_as_api_prompt(self._workflow_path_for_spec(table_spec))
             canonical_binding_key = self._resolve_workflow_binding_key(
                 workflow_table=table_spec.table,
                 prompt=prompt,
@@ -1648,13 +1734,9 @@ class LocalComfySQLEngine:
             kind = str(getattr(query, "kind", "workflow") or "workflow").lower()
             if kind not in {"workflow", "template"}:
                 kind = "workflow"
-            managed_workflow_path = self._materialize_workflow_copy(
-                source_path=resolved,
-                table_name=query.table_name,
-            )
             spec = self.registry.create_table(
                 query.table_name,
-                managed_workflow_path,
+                resolved,
                 kind=kind,
                 default_params=default_params,
                 meta=self._extract_workflow_meta(resolved),
@@ -1675,7 +1757,6 @@ class LocalComfySQLEngine:
             return result
 
         if isinstance(query, DropTableQuery):
-            existing_spec = self.registry.get(query.table_name)
             dropped = self.registry.drop_table(query.table_name)
             if not dropped:
                 raise SQLEngineError(f"Table '{query.table_name}' does not exist.", exit_code=2)
@@ -1683,14 +1764,6 @@ class LocalComfySQLEngine:
             self.character_binding_registry.delete_for_workflow(query.table_name)
             self.preset_registry.delete_for_template(query.table_name)
             self.workflow_binding_alias_registry.delete_workflow(query.table_name)
-            if existing_spec is not None:
-                try:
-                    managed_workflow_path = Path(existing_spec.workflow_path).resolve()
-                    managed_root = self._managed_workflows_dir().resolve()
-                    if managed_workflow_path.exists() and managed_root in managed_workflow_path.parents:
-                        managed_workflow_path.unlink()
-                except Exception:
-                    pass
             return {"action": "drop_table", "table": query.table_name}
 
         if isinstance(query, SetMetaQuery):
@@ -1881,7 +1954,7 @@ class LocalComfySQLEngine:
 
             workflow_spec = self.registry.get(query.target)
             if workflow_spec is not None:
-                prompt = self._load_workflow_as_api_prompt(Path(workflow_spec.workflow_path))
+                prompt = self._load_workflow_as_api_prompt(self._workflow_path_for_spec(workflow_spec))
                 bindable, ambiguous = self._workflow_bindable_fields(
                     workflow_table=workflow_spec.table,
                     prompt=prompt,
@@ -2670,7 +2743,7 @@ class LocalComfySQLEngine:
         if workflow_spec is not None:
             if isinstance(workflow_spec.default_params, dict) and workflow_spec.default_params:
                 return dict(workflow_spec.default_params)
-            prompt = self._load_workflow_as_api_prompt(Path(workflow_spec.workflow_path))
+            prompt = self._load_workflow_as_api_prompt(self._workflow_path_for_spec(workflow_spec))
             return self._extract_workflow_default_params(prompt)
 
         template = get_template(table_name.lower())
@@ -3390,7 +3463,7 @@ class LocalComfySQLEngine:
         where: dict[str, Any],
         source_alias: str | None,
     ) -> dict[str, Any]:
-        prompt = self._load_workflow_as_api_prompt(Path(table_spec.workflow_path))
+        prompt = self._load_workflow_as_api_prompt(self._workflow_path_for_spec(table_spec))
         patched = json.loads(json.dumps(prompt))
         simple_key_index, class_type_index, class_input_index = self._build_workflow_key_indexes(patched)
         alias_specs = self._ensure_workflow_binding_aliases(workflow_table=table_spec.table, prompt=patched)

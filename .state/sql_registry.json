@@ -3,7 +3,7 @@
   "tables": [
     {
       "table": "img2img_2_inputs",
-      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_2_inputs.json",
+      "workflow_path": "input/workflows/img2img_2_inputs.json",
       "created_at": 1775833008.525694,
       "kind": "workflow",
       "default_params": {
@@ -40,7 +40,7 @@
     },
     {
       "table": "img2img_controlnet",
-      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_controlnet.json",
+      "workflow_path": "input/workflows/img2img_controlnet.json",
       "created_at": 1775846972.9248629,
       "kind": "workflow",
       "default_params": {
@@ -87,7 +87,7 @@
     },
     {
       "table": "img2img_reference",
-      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_reference.json",
+      "workflow_path": "input/workflows/img2img_reference.json",
       "created_at": 1775833010.0035782,
       "kind": "workflow",
       "default_params": {
@@ -121,7 +121,7 @@
     },
     {
       "table": "txt2img_empty_latent",
-      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/txt2img_empty_latent.json",
+      "workflow_path": "input/workflows/txt2img_empty_latent.json",
       "created_at": 1775833010.7375412,
       "kind": "workflow",
       "default_params": {
@@ -146,7 +146,7 @@
     },
     {
       "table": "txt2img_starter_template",
-      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/txt2img_empty_latent.json",
+      "workflow_path": "input/workflows/txt2img_empty_latent.json",
       "created_at": 1775925998.5582159,
       "kind": "template",
       "default_params": {

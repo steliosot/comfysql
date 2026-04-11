@@ -223,6 +223,7 @@ Template note:
 
 - Template syntax is supported for compatibility.
 - Recommended primary flow is workflow table + presets/profiles + relational assets.
+- Workflow paths are stored as repo-relative `input/...`; legacy absolute registry paths auto-heal on first load.
 
 ## Presets
 

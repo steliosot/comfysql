@@ -42,7 +42,7 @@ def test_workflow_registry_roundtrip(tmp_path: Path) -> None:
     loaded = registry.get("my_table")
     assert loaded is not None
     assert loaded.table == "my_table"
-    assert Path(loaded.workflow_path) == wf
+    assert loaded.workflow_path == "wf.json"
     assert loaded.meta == {"intent": "image_generation"}
     assert registry.drop_table("my_table") is True
     assert registry.get("my_table") is None
@@ -66,6 +66,66 @@ def test_workflow_registry_migrates_v1_to_v2(tmp_path: Path) -> None:
     migrated = json.loads(registry_path.read_text(encoding="utf-8"))
     assert migrated["version"] == 3
     assert isinstance(migrated.get("tables"), list)
+
+
+def test_workflow_registry_migrates_absolute_path_into_workspace_relative(tmp_path: Path) -> None:
+    wf = tmp_path / "input" / "workflows" / "demo.json"
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text("{}", encoding="utf-8")
+    registry_path = tmp_path / ".state" / "sql_registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "tables": [
+                    {
+                        "table": "demo",
+                        "workflow_path": str(wf.resolve()),
+                        "created_at": 1.0,
+                        "kind": "workflow",
+                        "default_params": {},
+                        "meta": {},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    registry = WorkflowRegistry(registry_path, workspace_root=tmp_path)
+    loaded = registry.get("demo")
+    assert loaded is not None
+    assert loaded.workflow_path == "input/workflows/demo.json"
+
+
+def test_workflow_registry_recovers_broken_absolute_by_basename(tmp_path: Path) -> None:
+    wf = tmp_path / "input" / "workflows" / "demo_recover.json"
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text("{}", encoding="utf-8")
+    registry_path = tmp_path / ".state" / "sql_registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "tables": [
+                    {
+                        "table": "demo_recover",
+                        "workflow_path": "/nonexistent/machine/path/demo_recover.json",
+                        "created_at": 1.0,
+                        "kind": "workflow",
+                        "default_params": {},
+                        "meta": {},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    registry = WorkflowRegistry(registry_path, workspace_root=tmp_path)
+    loaded = registry.get("demo_recover")
+    assert loaded is not None
+    assert loaded.workflow_path == "input/workflows/demo_recover.json"
 
 
 def test_workflow_registry_migrates_v2_to_v3_with_empty_meta(tmp_path: Path) -> None:
@@ -494,7 +554,8 @@ def test_sql_parser_describe_workflow_specific_form(tmp_path: Path) -> None:
 
 def test_create_table_runs_validation_before_register(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     engine = _make_engine(tmp_path)
-    wf = tmp_path / "wf_create.json"
+    wf = engine.workspace_root / "input" / "workflows" / "wf_create.json"
+    wf.parent.mkdir(parents=True, exist_ok=True)
     wf.write_text(
         json.dumps(
             {
@@ -515,7 +576,7 @@ def test_create_table_runs_validation_before_register(monkeypatch: pytest.Monkey
     monkeypatch.setattr(engine, "_validate_compiled_prompt", _fake_validate)
 
     result = engine.execute_sql(
-        f"CREATE TABLE demo AS WORKFLOW '{wf}';",
+        "CREATE TABLE demo AS WORKFLOW '/input/workflows/wf_create.json';",
         compile_only=False,
         no_cache=False,
         timeout=30.0,
@@ -525,8 +586,16 @@ def test_create_table_runs_validation_before_register(monkeypatch: pytest.Monkey
     assert called["count"] == 1
     stored = engine.registry.get("demo")
     assert stored is not None
-    assert "/.state/workflows/" in Path(stored.workflow_path).as_posix()
-    assert Path(stored.workflow_path).exists()
+    assert stored.workflow_path == "input/workflows/wf_create.json"
+
+
+def test_resolve_workflow_path_accepts_slash_input_shorthand(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = engine.workspace_root / "input" / "workflows" / "wf_input.json"
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text("{}", encoding="utf-8")
+    resolved = engine._resolve_workflow_path("/input/workflows/wf_input.json")
+    assert resolved == wf.resolve()
 
 
 def test_create_table_runs_asset_upload_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
