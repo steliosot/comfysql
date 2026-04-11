@@ -11,42 +11,31 @@
 
 ComfySQL is a SQL-style layer on top of ComfyUI. Its goal is to make it easy to mix and match complex configurations.
 
-## About
+### About
 
 - Description: SQL-first workflow orchestration layer for ComfyUI (workflows, presets, profiles, characters, objects).
 - Website: use this repository README/docs (or set your project website in GitHub Settings if you have one).
 - Suggested topics: `comfyui`, `sql`, `image-generation`, `automation`, `workflow`, `python`, `cli`.
 
-## Project Standards
-
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Contributing Guide](CONTRIBUTING.md)
-- [License](LICENSE)
-
-## Quick Install
+### Quick Install
 
 ```bash
 python -m pip install "git+https://github.com/steliosot/comfysql.git"
 ```
 
-This installs the CLI commands:
-
-- `comfysql` (primary)
-- `comfy-agent` (compatibility alias)
-
-## Quick Update
+Quick Update
 
 ```bash
 python -m pip install --upgrade "git+https://github.com/steliosot/comfysql.git"
 ```
 
-## Start Here
+### Start Here
 
 - Installation guide: [INSTALL.md](INSTALL.md)
 - Beginner tutorial: [STARTERS.md](STARTERS.md)
 - Full command reference: [COMMANDS.md](COMMANDS.md)
 
-## Quick Use
+### Quick Use
 
 Open SQL terminal:
 
@@ -84,8 +73,7 @@ WHERE prompt='cinematic portrait of Betts wearing a summer hat walking in centra
 
 ## OpenClaw Skills
 
-Automation and reusable run packs are in `openclaw/`.
-
-- Skill index: [openclaw/OPENCLAW.md](openclaw/OPENCLAW.md)
+Automation and reusable run packs are in `openclaw/`. Checkout the index: [openclaw/OPENCLAW.md](openclaw/OPENCLAW.md)
 
 <sub>Built on top of <a href="https://github.com/comfyanonymous/ComfyUI">ComfyUI</a>. Additional inspiration/tools from <a href="https://github.com/pixaroma">Pixaroma</a>.</sub>
+
