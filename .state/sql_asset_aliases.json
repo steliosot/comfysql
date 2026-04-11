@@ -1,0 +1,26 @@
+{
+  "version": 3,
+  "aliases": [
+    {
+      "alias_name": "char_bets",
+      "kind": "character",
+      "image_name": "bets.png",
+      "created_at": 0.0,
+      "updated_at": 1775925894.774356
+    },
+    {
+      "alias_name": "char_matt",
+      "kind": "character",
+      "image_name": "matt.png",
+      "created_at": 0.0,
+      "updated_at": 1775925894.882096
+    },
+    {
+      "alias_name": "obj_hat",
+      "kind": "object",
+      "image_name": "sunday-afternoons-havana-hat-hat.jpg",
+      "created_at": 0.0,
+      "updated_at": 0.0
+    }
+  ]
+}

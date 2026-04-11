@@ -1,0 +1,13 @@
+{
+  "version": 3,
+  "bindings": [
+    {
+      "workflow_table": "img2img_reference",
+      "character_name": "char_matt",
+      "binding_key": "input_image",
+      "binding_value": "matt.png",
+      "created_at": 1775925379.526304,
+      "updated_at": 1775925379.526304
+    }
+  ]
+}

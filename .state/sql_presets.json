@@ -1,0 +1,247 @@
+{
+  "version": 3,
+  "presets": [
+    {
+      "template_name": "img2img_2_inputs",
+      "preset_name": "char_bets",
+      "params": {
+        "198.image": "bets.png"
+      },
+      "created_at": 1775898470.3804579,
+      "updated_at": 1775898882.157349
+    },
+    {
+      "template_name": "img2img_2_inputs",
+      "preset_name": "char_mary",
+      "params": {
+        "198.image": "mary.png"
+      },
+      "created_at": 1775898470.2540622,
+      "updated_at": 1775898876.3381708
+    },
+    {
+      "template_name": "img2img_2_inputs",
+      "preset_name": "char_matt",
+      "params": {
+        "198.image": "matt.png"
+      },
+      "created_at": 1775898470.123248,
+      "updated_at": 1775898871.121115
+    },
+    {
+      "template_name": "img2img_2_inputs",
+      "preset_name": "char_nick",
+      "params": {
+        "198.image": "nick.jpg.avif"
+      },
+      "created_at": 1775898470.5062091,
+      "updated_at": 1775898865.312941
+    },
+    {
+      "template_name": "img2img_2_inputs",
+      "preset_name": "default_run",
+      "params": {
+        "text": "Use the exact same woman from the reference image. Preserve her identity precisely \u2014 same face, facial features, skin tone, hairstyle, and natural expression.\n\nKeep the original background from the reference image unchanged. Do not modify or replace the environment \u2014 maintain the same location, perspective, and architectural details exactly as in the original image.\n\nThe woman is walking naturally in the same scene, with a relaxed, confident posture and slight forward motion, mid-step. Her pose is realistic and elegant.\n\nShe is holding exactly one large soft brown leather handbag in her right hand. Only one bag is present.\n\nThe handbag is a luxury Fendi-style leather bag, made of high-quality smooth brown leather, with natural folds and soft structure. The material should appear premium, slightly matte with subtle highlights, showing realistic leather texture and stitching.\n\nThe Fendi logo is clearly visible and preserved exactly as in the reference bag \u2014 centered, clean, and not distorted. Maintain the original design, proportions, and structure of the bag without alteration.\n\nThe bag is realistically integrated, correctly scaled, with natural grip and weight. It interacts naturally with her hand and arm, with slight tension and realistic positioning.\n\nLighting must remain consistent with the original image \u2014 same direction, intensity, and shadows. Ensure realistic shadows on her body and the bag.\n\nHer feet must be properly grounded on the existing surface with subtle contact shadows.\n\nShot on a Canon DSLR, 50mm lens \u2014 subject in sharp focus, background slightly blurred but still recognizable (natural depth of field).\n\nPreserve natural skin texture with fine detail, avoid overly smooth or plastic appearance.\n\nUltra-realistic, seamless integration \u2014 no cutout or pasted look, correct anatomy, correct proportions, correct perspective.\n\nThe woman has only one handbag, held in her right hand.\n\nKeep the woman as close as possible to the one in the photo provided.",
+        "seed": 2,
+        "steps": 7,
+        "cfg": 1,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1,
+        "unet_name": "flux-2-klein-4b-fp8.safetensors",
+        "weight_dtype": "fp8_e4m3fn_fast",
+        "clip_name": "qwen_3_4b.safetensors",
+        "type": "flux2",
+        "device": "default",
+        "vae_name": "flux2-vae.safetensors",
+        "width": 512,
+        "height": 512,
+        "batch_size": 1,
+        "198.image": "Screenshot 2026-04-09 at 17.10.35.png",
+        "199.upscale_method": "nearest-exact",
+        "199.megapixels": 0.5,
+        "199.resolution_steps": 1,
+        "filename_prefix": "img",
+        "212.upscale_method": "nearest-exact",
+        "212.megapixels": 0.5,
+        "212.resolution_steps": 1,
+        "213.image": "Screenshot 2026-04-08 at 14.10.17.png"
+      },
+      "created_at": 1775833344.072329,
+      "updated_at": 1775833344.072329
+    },
+    {
+      "template_name": "img2img_controlnet",
+      "preset_name": "char_bets",
+      "params": {
+        "input_image": "bets.png"
+      },
+      "created_at": 1775898469.864935,
+      "updated_at": 1775898880.045218
+    },
+    {
+      "template_name": "img2img_controlnet",
+      "preset_name": "char_mary",
+      "params": {
+        "input_image": "mary.png"
+      },
+      "created_at": 1775898469.733713,
+      "updated_at": 1775898874.579884
+    },
+    {
+      "template_name": "img2img_controlnet",
+      "preset_name": "char_matt",
+      "params": {
+        "input_image": "matt.png"
+      },
+      "created_at": 1775898469.583203,
+      "updated_at": 1775898868.962435
+    },
+    {
+      "template_name": "img2img_controlnet",
+      "preset_name": "char_nick",
+      "params": {
+        "input_image": "nick.jpg.avif"
+      },
+      "created_at": 1775898469.995167,
+      "updated_at": 1775898863.543139
+    },
+    {
+      "template_name": "img2img_reference",
+      "preset_name": "char_bets",
+      "params": {
+        "input_image": "bets.png"
+      },
+      "created_at": 1775898469.3227232,
+      "updated_at": 1775898878.2527459
+    },
+    {
+      "template_name": "img2img_reference",
+      "preset_name": "char_mary",
+      "params": {
+        "input_image": "mary.png"
+      },
+      "created_at": 1775898469.193463,
+      "updated_at": 1775898872.8799381
+    },
+    {
+      "template_name": "img2img_reference",
+      "preset_name": "char_matt",
+      "params": {
+        "input_image": "matt.png"
+      },
+      "created_at": 1775898469.0687711,
+      "updated_at": 1775898867.027589
+    },
+    {
+      "template_name": "img2img_reference",
+      "preset_name": "char_nick",
+      "params": {
+        "input_image": "nick.jpg.avif"
+      },
+      "created_at": 1775898469.453381,
+      "updated_at": 1775898861.798732
+    },
+    {
+      "template_name": "img2img_reference",
+      "preset_name": "default_run",
+      "params": {
+        "vae_name": "flux2-vae.safetensors",
+        "clip_name": "qwen_3_4b.safetensors",
+        "type": "flux2",
+        "device": "default",
+        "unet_name": "flux-2-klein-4b-fp8.safetensors",
+        "weight_dtype": "fp8_e4m3fn_fast",
+        "12.text": "A beautiful woman with natural features, maintaining the same face, skin tone, hairstyle, and expression.\n\nThe background remains unchanged, with warm stone architecture, stairs, and soft natural daylight creating a calm and elegant setting.\n\nShe is standing in a relaxed and natural pose, slightly angled toward the camera. With one hand, she gently lifts and holds the edge of her skirt, creating a soft, natural flow in the fabric. The movement is subtle and elegant, not exaggerated.\n\nLighting is natural daylight, warm and balanced, with soft realistic shadows on her body and the ground.\n\nHer feet are naturally grounded, maintaining balance, with subtle contact shadows that enhance realism.\n\nShot on a Canon DSLR, 50mm lens \u2014 the subject is in clear focus, while the background remains slightly soft with natural depth of field.\n\nHer skin texture is natural and detailed, avoiding any overly smooth or artificial look.\n\nThe overall result is ultra-realistic, seamless, with correct anatomy, proportions, and perspective.",
+        "seed": 2,
+        "steps": 6,
+        "cfg": 1,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1,
+        "filename_prefix": "img",
+        "width": 512,
+        "height": 512,
+        "batch_size": 1,
+        "21.text": "ugly",
+        "image": "Screenshot 2026-04-09 at 17.10.35.png",
+        "upscale_method": "nearest-exact",
+        "megapixels": 0.5,
+        "resolution_steps": 1
+      },
+      "created_at": 1775833040.171693,
+      "updated_at": 1775833040.290338
+    },
+    {
+      "template_name": "txt2img_empty_latent",
+      "preset_name": "default_run",
+      "params": {
+        "seed": 775723202,
+        "steps": 20,
+        "cfg": 8,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1,
+        "ckpt_name": "sdxl/juggernautXL_version2.safetensors",
+        "width": 1024,
+        "height": 1024,
+        "batch_size": 1,
+        "6.text": "beautiful scenery nature glass bottle landscape, , purple galaxy bottle,",
+        "7.text": "text, watermark",
+        "filename_prefix": "txt2img"
+      },
+      "created_at": 1775833039.8002791,
+      "updated_at": 1775833039.92111
+    },
+    {
+      "template_name": "txt2img_empty_latent",
+      "preset_name": "rapid_grid_512",
+      "params": {
+        "steps": 7,
+        "cfg": 8,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1,
+        "width": 512,
+        "height": 512,
+        "batch_size": 4,
+        "filename_prefix": "rapid_grid_512"
+      },
+      "created_at": 1775833040.048647,
+      "updated_at": 1775833040.048647
+    },
+    {
+      "template_name": "txt2img_empty_latent",
+      "preset_name": "txt2img_normal_sched_v1",
+      "params": {
+        "scheduler": "normal",
+        "sampler_name": "karras"
+      },
+      "created_at": 1775920914.034753,
+      "updated_at": 1775925856.410186
+    },
+    {
+      "template_name": "txt2img_starter_template",
+      "preset_name": "fluxmania_v1",
+      "params": {
+        "ckpt_name": "fluxmania_V",
+        "sampler_name": "euler"
+      },
+      "created_at": 1775925998.8089201,
+      "updated_at": 1775925998.8089201
+    },
+    {
+      "template_name": "txt2img_starter_template",
+      "preset_name": "juggernaut_reborn_sd15",
+      "params": {
+        "ckpt_name": "sd1.5/juggernaut_reborn.safetensors",
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "steps": 24,
+        "cfg": 7
+      },
+      "created_at": 1775902290.639054,
+      "updated_at": 1775925998.70105
+    }
+  ]
+}

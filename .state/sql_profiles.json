@@ -1,0 +1,301 @@
+{
+  "version": 3,
+  "profiles": [
+    {
+      "profile_name": "cinematic_portrait_lens_50mm",
+      "params": {
+        "lens": "50mm (Standard)",
+        "camera_distance": "Medium Close-Up",
+        "camera_angle": "Low Angle",
+        "lighting_direction": "front, side, back, top",
+        "lighting_type": "natural light",
+        "lighting_quality": "soft",
+        "lighting_time": "golden hour"
+      },
+      "created_at": 1775833040.901929,
+      "updated_at": 1775833040.901929
+    },
+    {
+      "profile_name": "closeup_soft_light",
+      "params": {
+        "lens": "100mm Macro",
+        "camera_distance": "Extreme Close-Up",
+        "camera_angle": "Eye Level",
+        "lighting_direction": "front",
+        "lighting_type": "studio light",
+        "lighting_quality": "very soft, texture-focused",
+        "lighting_time": "controlled studio"
+      },
+      "created_at": 1775833301.354344,
+      "updated_at": 1775833301.354344
+    },
+    {
+      "profile_name": "dramatic_low_angle",
+      "params": {
+        "lens": "35mm",
+        "camera_distance": "Medium Shot",
+        "camera_angle": "Low Angle",
+        "lighting_direction": "side",
+        "lighting_type": "studio light",
+        "lighting_quality": "hard, high contrast",
+        "lighting_time": "controlled studio"
+      },
+      "created_at": 1775833301.568862,
+      "updated_at": 1775833301.568862
+    },
+    {
+      "profile_name": "goldenhour_backlight",
+      "params": {
+        "lens": "50mm",
+        "camera_distance": "Medium Shot",
+        "camera_angle": "Eye Level",
+        "lighting_direction": "back",
+        "lighting_type": "natural light",
+        "lighting_quality": "warm, glowing edges",
+        "lighting_time": "golden hour"
+      },
+      "created_at": 1775833301.921369,
+      "updated_at": 1775833301.921369
+    },
+    {
+      "profile_name": "hd_1080p",
+      "params": {
+        "width": 1920,
+        "height": 1080
+      },
+      "created_at": 1775833042.368429,
+      "updated_at": 1775833042.368429
+    },
+    {
+      "profile_name": "hd_720p",
+      "params": {
+        "width": 1280,
+        "height": 720
+      },
+      "created_at": 1775833042.251712,
+      "updated_at": 1775833042.251712
+    },
+    {
+      "profile_name": "high_angle_overcast",
+      "params": {
+        "lens": "24mm",
+        "camera_distance": "Wide Shot",
+        "camera_angle": "High Angle",
+        "lighting_direction": "top",
+        "lighting_type": "natural light",
+        "lighting_quality": "diffused, flat",
+        "lighting_time": "overcast"
+      },
+      "created_at": 1775833301.682102,
+      "updated_at": 1775833301.682102
+    },
+    {
+      "profile_name": "landscape_16x9",
+      "params": {
+        "width": 1920,
+        "height": 1080
+      },
+      "created_at": 1775833041.019284,
+      "updated_at": 1775833041.019284
+    },
+    {
+      "profile_name": "landscape_3x2",
+      "params": {
+        "width": 1536,
+        "height": 1024
+      },
+      "created_at": 1775833041.772483,
+      "updated_at": 1775833041.772483
+    },
+    {
+      "profile_name": "lens_50mm",
+      "params": {
+        "width": 1344,
+        "height": 768
+      },
+      "created_at": 1775833040.787903,
+      "updated_at": 1775833040.787903
+    },
+    {
+      "profile_name": "mediumshot_natural",
+      "params": {
+        "lens": "50mm",
+        "camera_distance": "Medium Shot",
+        "camera_angle": "Eye Level",
+        "lighting_direction": "front",
+        "lighting_type": "natural light",
+        "lighting_quality": "soft",
+        "lighting_time": "daylight"
+      },
+      "created_at": 1775833301.460028,
+      "updated_at": 1775833301.460028
+    },
+    {
+      "profile_name": "natural_35mm",
+      "params": {
+        "lens": "35mm",
+        "camera_distance": "Medium Wide",
+        "camera_angle": "Eye Level",
+        "lighting_direction": "front",
+        "lighting_type": "natural light",
+        "lighting_quality": "soft",
+        "lighting_time": "daylight"
+      },
+      "created_at": 1775833301.1389718,
+      "updated_at": 1775833301.1389718
+    },
+    {
+      "profile_name": "portrait_2x3",
+      "params": {
+        "width": 1024,
+        "height": 1536
+      },
+      "created_at": 1775833041.899103,
+      "updated_at": 1775833041.899103
+    },
+    {
+      "profile_name": "portrait_4x5",
+      "params": {
+        "width": 1080,
+        "height": 1352
+      },
+      "created_at": 1775833041.152946,
+      "updated_at": 1775897302.912317
+    },
+    {
+      "profile_name": "portrait_85mm",
+      "params": {
+        "width": 832,
+        "height": 1216,
+        "lens": "85mm (Portrait)"
+      },
+      "created_at": 1775833040.534153,
+      "updated_at": 1775833040.534153
+    },
+    {
+      "profile_name": "print_a4_landscape",
+      "params": {
+        "width": 3504,
+        "height": 2480
+      },
+      "created_at": 1775833042.141366,
+      "updated_at": 1775897303.050824
+    },
+    {
+      "profile_name": "print_a4_portrait",
+      "params": {
+        "width": 2480,
+        "height": 3504
+      },
+      "created_at": 1775833042.031347,
+      "updated_at": 1775897303.180618
+    },
+    {
+      "profile_name": "reel_9x16",
+      "params": {
+        "width": 1080,
+        "height": 1920
+      },
+      "created_at": 1775833041.53636,
+      "updated_at": 1775833041.53636
+    },
+    {
+      "profile_name": "square_1024",
+      "params": {
+        "width": 1024,
+        "height": 1024
+      },
+      "created_at": 1775833041.285918,
+      "updated_at": 1775833041.285918
+    },
+    {
+      "profile_name": "square_1x1",
+      "params": {
+        "width": 1080,
+        "height": 1080
+      },
+      "created_at": 1775833040.4129338,
+      "updated_at": 1775833040.4129338
+    },
+    {
+      "profile_name": "standard_50mm",
+      "params": {
+        "lens": "50mm",
+        "camera_distance": "Medium Shot",
+        "camera_angle": "Eye Level",
+        "lighting_direction": "front",
+        "lighting_type": "natural light",
+        "lighting_quality": "balanced",
+        "lighting_time": "daylight"
+      },
+      "created_at": 1775833301.24911,
+      "updated_at": 1775833301.24911
+    },
+    {
+      "profile_name": "starter_portrait_v1",
+      "params": {
+        "width": 1024,
+        "height": 1024,
+        "lens": "50mm (Standard)",
+        "camera_distance": "Medium Close-Up"
+      },
+      "created_at": 1775902963.6741388,
+      "updated_at": 1775925854.388702
+    },
+    {
+      "profile_name": "story_9x16",
+      "params": {
+        "width": 1080,
+        "height": 1920
+      },
+      "created_at": 1775833041.400657,
+      "updated_at": 1775833041.400657
+    },
+    {
+      "profile_name": "studio_hard_side",
+      "params": {
+        "lens": "85mm",
+        "camera_distance": "Medium Close-Up",
+        "camera_angle": "Eye Level",
+        "lighting_direction": "side",
+        "lighting_type": "studio light",
+        "lighting_quality": "hard, sharp shadows",
+        "lighting_time": "controlled studio"
+      },
+      "created_at": 1775833301.801901,
+      "updated_at": 1775833301.801901
+    },
+    {
+      "profile_name": "vertical_9x16",
+      "params": {
+        "width": 1080,
+        "height": 1920
+      },
+      "created_at": 1775833040.65932,
+      "updated_at": 1775833040.65932
+    },
+    {
+      "profile_name": "wide_21x9",
+      "params": {
+        "width": 1920,
+        "height": 824
+      },
+      "created_at": 1775833041.661685,
+      "updated_at": 1775897303.309335
+    },
+    {
+      "profile_name": "wide_24mm",
+      "params": {
+        "lens": "24mm Wide",
+        "camera_distance": "Wide Shot",
+        "camera_angle": "Eye Level",
+        "lighting_direction": "front",
+        "lighting_type": "natural light",
+        "lighting_quality": "balanced",
+        "lighting_time": "daylight"
+      },
+      "created_at": 1775833301.0286279,
+      "updated_at": 1775833301.0286279
+    }
+  ]
+}

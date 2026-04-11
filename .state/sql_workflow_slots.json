@@ -1,0 +1,37 @@
+{
+  "version": 3,
+  "slots": [
+    {
+      "workflow_table": "img2img_2_inputs",
+      "slot_name": "hat",
+      "slot_kind": "object",
+      "binding_key": "213.image",
+      "created_at": 0.0,
+      "updated_at": 1775925895.3130329
+    },
+    {
+      "workflow_table": "img2img_2_inputs",
+      "slot_name": "subject",
+      "slot_kind": "character",
+      "binding_key": "198.image",
+      "created_at": 0.0,
+      "updated_at": 1775925895.205855
+    },
+    {
+      "workflow_table": "img2img_controlnet",
+      "slot_name": "subject",
+      "slot_kind": "character",
+      "binding_key": "input_image",
+      "created_at": 0.0,
+      "updated_at": 0.0
+    },
+    {
+      "workflow_table": "img2img_reference",
+      "slot_name": "subject",
+      "slot_kind": "character",
+      "binding_key": "input_image",
+      "created_at": 0.0,
+      "updated_at": 1775925894.990231
+    }
+  ]
+}

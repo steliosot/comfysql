@@ -1,0 +1,170 @@
+{
+  "version": 3,
+  "tables": [
+    {
+      "table": "img2img_2_inputs",
+      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_2_inputs.json",
+      "created_at": 1775833008.525694,
+      "kind": "workflow",
+      "default_params": {
+        "text": "Use the exact same woman from the reference image. Preserve her identity precisely \u2014 same face, facial features, skin tone, hairstyle, and natural expression.\n\nKeep the original background from the reference image unchanged. Do not modify or replace the environment \u2014 maintain the same location, perspective, and architectural details exactly as in the original image.\n\nThe woman is walking naturally in the same scene, with a relaxed, confident posture and slight forward motion, mid-step. Her pose is realistic and elegant.\n\nShe is holding exactly one large soft brown leather handbag in her right hand. Only one bag is present.\n\nThe handbag is a luxury Fendi-style leather bag, made of high-quality smooth brown leather, with natural folds and soft structure. The material should appear premium, slightly matte with subtle highlights, showing realistic leather texture and stitching.\n\nThe Fendi logo is clearly visible and preserved exactly as in the reference bag \u2014 centered, clean, and not distorted. Maintain the original design, proportions, and structure of the bag without alteration.\n\nThe bag is realistically integrated, correctly scaled, with natural grip and weight. It interacts naturally with her hand and arm, with slight tension and realistic positioning.\n\nLighting must remain consistent with the original image \u2014 same direction, intensity, and shadows. Ensure realistic shadows on her body and the bag.\n\nHer feet must be properly grounded on the existing surface with subtle contact shadows.\n\nShot on a Canon DSLR, 50mm lens \u2014 subject in sharp focus, background slightly blurred but still recognizable (natural depth of field).\n\nPreserve natural skin texture with fine detail, avoid overly smooth or plastic appearance.\n\nUltra-realistic, seamless integration \u2014 no cutout or pasted look, correct anatomy, correct proportions, correct perspective.\n\nThe woman has only one handbag, held in her right hand.\n\nKeep the woman as close as possible to the one in the photo provided.",
+        "seed": 2,
+        "steps": 7,
+        "cfg": 1,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1,
+        "unet_name": "flux-2-klein-4b-fp8.safetensors",
+        "weight_dtype": "fp8_e4m3fn_fast",
+        "clip_name": "qwen_3_4b.safetensors",
+        "type": "flux2",
+        "device": "default",
+        "vae_name": "flux2-vae.safetensors",
+        "width": 512,
+        "height": 512,
+        "batch_size": 1,
+        "198.image": "Screenshot 2026-04-09 at 17.10.35.png",
+        "199.upscale_method": "nearest-exact",
+        "199.megapixels": 0.5,
+        "199.resolution_steps": 1,
+        "filename_prefix": "img",
+        "212.upscale_method": "nearest-exact",
+        "212.megapixels": 0.5,
+        "212.resolution_steps": 1,
+        "213.image": "Screenshot 2026-04-08 at 14.10.17.png"
+      },
+      "meta": {
+        "intent": "image_generation",
+        "signature": "image_to_image+multi_reference+identity_preservation"
+      }
+    },
+    {
+      "table": "img2img_controlnet",
+      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_controlnet.json",
+      "created_at": 1775846972.9248629,
+      "kind": "workflow",
+      "default_params": {
+        "ckpt_name": "sdxl/Juggernaut_X_RunDiffusion.safetensors",
+        "width": 1024,
+        "height": 1024,
+        "batch_size": 1,
+        "6.text": "a rainy London street scene, wet pavement reflecting city lights, soft rain falling, cloudy sky, moody atmosphere, elegant historic buildings, cinematic lighting, subtle fog, realistic reflections, people walking with umbrellas, natural urban environment, dramatic but calm mood, epic composition, highly detailed, digital painting, illustration, cinematic color grading",
+        "seed": 1,
+        "steps": 40,
+        "cfg": 7,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1,
+        "8.text": "cartoon, anime, illustration, painting, low quality, blurry, overexposed, oversharpened, unrealistic, bad perspective, distorted buildings, floating objects, duplicate structures, watermark, text, logo, artifacts, no colors in the fce",
+        "image": "bbk-euston.jpg",
+        "13.preprocessor": "DepthAnythingV2Preprocessor",
+        "13.resolution": 1024,
+        "15.preprocessor": "CannyEdgePreprocessor",
+        "15.resolution": 512,
+        "switch_1": "On",
+        "controlnet_1": "diffusion_pytorch_model_promax.safetensors",
+        "controlnet_strength_1": 0.8,
+        "start_percent_1": 0,
+        "end_percent_1": 0.6,
+        "switch_2": "On",
+        "controlnet_2": "diffusion_pytorch_model_promax.safetensors",
+        "controlnet_strength_2": 0.9,
+        "start_percent_2": 0,
+        "end_percent_2": 1,
+        "switch_3": "On",
+        "controlnet_3": "diffusion_pytorch_model_promax.safetensors",
+        "controlnet_strength_3": 0.6,
+        "start_percent_3": 0.1,
+        "end_percent_3": 0.6,
+        "switch": "On",
+        "25.preprocessor": "SAMPreprocessor",
+        "25.resolution": 512
+      },
+      "meta": {
+        "intent": "image_generation",
+        "signature": "image_to_image+controlnet"
+      }
+    },
+    {
+      "table": "img2img_reference",
+      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/img2img_reference.json",
+      "created_at": 1775833010.0035782,
+      "kind": "workflow",
+      "default_params": {
+        "vae_name": "flux2-vae.safetensors",
+        "clip_name": "qwen_3_4b.safetensors",
+        "type": "flux2",
+        "device": "default",
+        "unet_name": "flux-2-klein-4b-fp8.safetensors",
+        "weight_dtype": "fp8_e4m3fn_fast",
+        "12.text": "A beautiful woman with natural features, maintaining the same face, skin tone, hairstyle, and expression.\n\nThe background remains unchanged, with warm stone architecture, stairs, and soft natural daylight creating a calm and elegant setting.\n\nShe is standing in a relaxed and natural pose, slightly angled toward the camera. With one hand, she gently lifts and holds the edge of her skirt, creating a soft, natural flow in the fabric. The movement is subtle and elegant, not exaggerated.\n\nLighting is natural daylight, warm and balanced, with soft realistic shadows on her body and the ground.\n\nHer feet are naturally grounded, maintaining balance, with subtle contact shadows that enhance realism.\n\nShot on a Canon DSLR, 50mm lens \u2014 the subject is in clear focus, while the background remains slightly soft with natural depth of field.\n\nHer skin texture is natural and detailed, avoiding any overly smooth or artificial look.\n\nThe overall result is ultra-realistic, seamless, with correct anatomy, proportions, and perspective.",
+        "seed": 2,
+        "steps": 10,
+        "cfg": 1,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1,
+        "filename_prefix": "img",
+        "width": 512,
+        "height": 512,
+        "batch_size": 1,
+        "21.text": "ugly",
+        "image": "Screenshot 2026-04-09 at 17.10.35.png",
+        "upscale_method": "nearest-exact",
+        "megapixels": 0.5,
+        "resolution_steps": 1
+      },
+      "meta": {
+        "intent": "image_generation",
+        "signature": "image_to_image+single_reference"
+      }
+    },
+    {
+      "table": "txt2img_empty_latent",
+      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/txt2img_empty_latent.json",
+      "created_at": 1775833010.7375412,
+      "kind": "workflow",
+      "default_params": {
+        "seed": 775723202,
+        "steps": 20,
+        "cfg": 8,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1,
+        "ckpt_name": "sdxl/juggernautXL_version2.safetensors",
+        "width": 512,
+        "height": 512,
+        "batch_size": 1,
+        "6.text": "beautiful scenery nature glass bottle landscape, , purple galaxy bottle,",
+        "7.text": "text, watermark",
+        "filename_prefix": "ComfyUI"
+      },
+      "meta": {
+        "intent": "image_generation",
+        "signature": "text_to_image"
+      }
+    },
+    {
+      "table": "txt2img_starter_template",
+      "workflow_path": "/Users/stelios/Downloads/ComfyUI-custom/input/workflows/txt2img_empty_latent.json",
+      "created_at": 1775925998.5582159,
+      "kind": "template",
+      "default_params": {
+        "seed": 775723202,
+        "steps": 20,
+        "cfg": 8,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1,
+        "ckpt_name": "sdxl/juggernautXL_version2.safetensors",
+        "width": 512,
+        "height": 512,
+        "batch_size": 1,
+        "6.text": "beautiful scenery nature glass bottle landscape, , purple galaxy bottle,",
+        "7.text": "text, watermark",
+        "filename_prefix": "ComfyUI"
+      },
+      "meta": {}
+    }
+  ]
+}
