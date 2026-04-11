@@ -7,6 +7,23 @@
 
 ComfySQL is a SQL-style layer on top of ComfyUI. Its goal is to make it easy to mix and match complex configurations.
 
+## Quick Install
+
+```bash
+python -m pip install "git+https://github.com/steliosot/comfysql.git"
+```
+
+This installs the CLI commands:
+
+- `comfysql` (primary)
+- `comfy-agent` (compatibility alias)
+
+## Quick Update
+
+```bash
+python -m pip install --upgrade "git+https://github.com/steliosot/comfysql.git"
+```
+
 ## Start Here
 
 - Beginner tutorial: [STARTERS.md](/Users/stelios/Downloads/ComfyUI-custom/STARTERS.md)
@@ -31,11 +48,11 @@ PROFILE lens_50mm
 WHERE prompt='cinematic portrait of Matt wearing a summer hat walking in central London';
 ```
 
-**ComfySQL customizes your ComfyUI workflows with characters, objects, shooting profiles, and configurations, making production easy and reproducible at scale.**
+ComfySQL customizes your ComfyUI workflows with characters, objects, shooting profiles, and configurations, making production easy and reproducible at scale.
 
 ![Group 6](output/matt_gen_group.png)
 
-So you can keep customizing as you like.
+So you can keep customizing as you like!
 
 ```sql
 SELECT image
