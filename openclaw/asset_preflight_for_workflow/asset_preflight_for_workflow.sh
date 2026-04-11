@@ -5,8 +5,11 @@ REPO_ROOT="$(cd "$(dirname "$0")"/../.. && pwd)"
 cd "$REPO_ROOT"
 
 SERVER="${1:-remote}"
+WORKFLOW="${2:-img2img_reference}"
+PRESET="${3:-default_run}"
+INPUT_IMAGE="${4:-bbk-euston.jpg}"
 
-STATUS_OUT="$(comfy-agent status "$SERVER")"
+STATUS_OUT="$(comfysql status "$SERVER")"
 echo "$STATUS_OUT"
 if [[ "$STATUS_OUT" != *"status=running_remote"* ]]; then
   echo "[asset_preflight_for_workflow] server is not reachable/running for alias '$SERVER'." >&2
@@ -14,13 +17,13 @@ if [[ "$STATUS_OUT" != *"status=running_remote"* ]]; then
 fi
 
 # Fail fast prechecks for required workflow/preset.
-comfy-agent sql "$SERVER" --sql "DESCRIBE WORKFLOW img2img_reference;" >/dev/null
-if ! comfy-agent sql "$SERVER" --sql "DESCRIBE PRESET default_run FOR img2img_reference;" >/dev/null; then
-  echo "[asset_preflight_for_workflow] missing preset 'default_run' for table 'img2img_reference'." >&2
+comfysql sql "$SERVER" --sql "DESCRIBE WORKFLOW ${WORKFLOW}" >/dev/null
+if ! comfysql sql "$SERVER" --sql "DESCRIBE PRESET ${PRESET} FOR ${WORKFLOW}" >/dev/null; then
+  echo "[asset_preflight_for_workflow] missing preset '${PRESET}' for table '${WORKFLOW}'." >&2
   exit 2
 fi
 
-comfy-agent copy-assets "$SERVER" --all --dry-run
-comfy-agent copy-assets "$SERVER" --all
+comfysql copy-assets "$SERVER" --all --dry-run
+comfysql copy-assets "$SERVER" --all
 
-comfy-agent sql "$SERVER" --compile-only --sql "EXPLAIN SELECT image FROM img2img_reference USING default_run WHERE input_image='bbk-euston.jpg' AND prompt='asset preflight check' AND seed=404;"
+comfysql sql "$SERVER" --compile-only --sql "EXPLAIN SELECT image FROM ${WORKFLOW} USING ${PRESET} WHERE input_image='${INPUT_IMAGE}' AND prompt='asset preflight check' AND seed=404"

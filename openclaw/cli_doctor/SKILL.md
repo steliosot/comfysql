@@ -1,8 +1,8 @@
 ---
 name: cli_doctor
-description: Run full connectivity diagnostics (health/object_info/models/websocket/auth) using comfy-agent doctor.
+description: Run full connectivity diagnostics (health/object_info/models/websocket/auth) using comfysql doctor.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🩺","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🩺","requires":{"bins":["comfysql"]}}}
 ---
 
 # cli_doctor
@@ -11,7 +11,7 @@ Use this skill when status alone is not enough and you need detailed diagnostics
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Server alias exists in config (for example `remote`).
 
 ## Execution

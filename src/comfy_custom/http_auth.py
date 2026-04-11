@@ -33,6 +33,10 @@ def auth_header_variants(base_headers: dict[str, str] | None = None) -> list[dic
                 alt = dict(headers)
                 alt["Authorization"] = token
                 variants.append(alt)
+    # Some reverse proxies reject malformed/strict Authorization headers on specific endpoints
+    # (for example /history) even when the endpoint is otherwise public. Try a no-auth variant last.
+    if headers:
+        variants.append({})
     return variants
 
 

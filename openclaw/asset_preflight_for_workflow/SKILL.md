@@ -2,7 +2,7 @@
 name: asset_preflight_for_workflow
 description: Preflight workflow image/audio assets by syncing local input/assets and running compile-only SQL checks.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🧪","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🧪","requires":{"bins":["comfysql"]}}}
 ---
 
 # asset_preflight_for_workflow
@@ -11,7 +11,7 @@ Use this skill to prevent missing-asset failures before execution.
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Relevant files exist in `input/assets`.
 
 ## Execution

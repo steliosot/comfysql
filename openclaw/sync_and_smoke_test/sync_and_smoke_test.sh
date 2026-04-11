@@ -6,7 +6,7 @@ cd "$REPO_ROOT"
 
 SERVER="${1:-remote}"
 
-STATUS_OUT="$(comfy-agent status "$SERVER")"
+STATUS_OUT="$(comfysql status "$SERVER")"
 echo "$STATUS_OUT"
 if [[ "$STATUS_OUT" != *"status=running_remote"* ]]; then
   echo "[sync_and_smoke_test] server is not reachable/running for alias '$SERVER'." >&2
@@ -14,11 +14,11 @@ if [[ "$STATUS_OUT" != *"status=running_remote"* ]]; then
 fi
 
 # Fail fast prechecks for required workflow/preset.
-comfy-agent sql "$SERVER" --sql "DESCRIBE WORKFLOW txt2img_empty_latent;" >/dev/null
-if ! comfy-agent sql "$SERVER" --sql "DESCRIBE PRESET default_run FOR txt2img_empty_latent;" >/dev/null; then
+comfysql sql "$SERVER" --sql "DESCRIBE WORKFLOW txt2img_empty_latent;" >/dev/null
+if ! comfysql sql "$SERVER" --sql "DESCRIBE PRESET default_run FOR txt2img_empty_latent;" >/dev/null; then
   echo "[sync_and_smoke_test] missing preset 'default_run' for table 'txt2img_empty_latent'." >&2
   exit 2
 fi
 
-comfy-agent sync "$SERVER"
-comfy-agent sql "$SERVER" --compile-only --sql "EXPLAIN SELECT image FROM txt2img_empty_latent USING default_run WHERE prompt='post-sync smoke test' AND seed=505;"
+comfysql sync "$SERVER"
+comfysql sql "$SERVER" --compile-only --sql "EXPLAIN SELECT image FROM txt2img_empty_latent USING default_run WHERE prompt='post-sync smoke test' AND seed=505;"

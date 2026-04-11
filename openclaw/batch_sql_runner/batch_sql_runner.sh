@@ -12,7 +12,7 @@ if [[ "$#" -eq 0 ]]; then
   exit 2
 fi
 
-STATUS_OUT="$(comfy-agent status "$SERVER")"
+STATUS_OUT="$(comfysql status "$SERVER")"
 echo "$STATUS_OUT"
 if [[ "$STATUS_OUT" != *"status=running_remote"* ]]; then
   echo "[batch_sql_runner] server is not reachable/running for alias '$SERVER'." >&2
@@ -21,5 +21,5 @@ fi
 
 for SQL_FILE in "$@"; do
   echo "[batch_sql_runner] running: $SQL_FILE"
-  comfy-agent sql "$SERVER" --sql-file "$SQL_FILE"
+  comfysql sql "$SERVER" --sql-file "$SQL_FILE"
 done

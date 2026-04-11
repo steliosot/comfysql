@@ -2,7 +2,7 @@
 name: comfysql_query_ops
 description: Discover and inspect ComfySQL state (workflows, presets, profiles, metadata, and model inventory) using read-only SQL commands.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🧭","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🧭","requires":{"bins":["comfysql"]}}}
 ---
 
 # comfysql_query_ops
@@ -11,7 +11,7 @@ Use this skill for read-only ComfySQL discovery and diagnostics.
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - A server alias is configured (for example `remote`).
 
 ## Execution

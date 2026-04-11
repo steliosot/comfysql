@@ -23,6 +23,7 @@ test = [
 
 [project.scripts]
 comfy-agent = "comfy_custom.cli:main"
+comfysql = "comfy_custom.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

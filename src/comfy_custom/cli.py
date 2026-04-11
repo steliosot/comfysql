@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 import websocket
+from comfy_custom.http_auth import urlopen_with_auth_fallback
 from comfy_custom.sql_engine import LocalComfySQLEngine, SQLEngineError
 from comfy_custom.terminal_ui import TerminalUI
 
@@ -59,7 +61,49 @@ class ConnectionSettings:
 
 
 def log(message: str) -> None:
-    print(f"[comfy-agent] {message}", flush=True)
+    _ui().info(f"[comfy-agent] {message}")
+
+
+def _error_hint_for_message(message: str) -> str | None:
+    text = str(message or "").strip().lower()
+    if not text:
+        return None
+
+    if "unknown server alias" in text or "config has no 'servers' map" in text:
+        return "Run `comfysql config init` and then `comfysql status <alias>`."
+    if "comfy_url/config server.url" in text or "config already exists" in text:
+        return f"Check `{DEFAULT_CONFIG_FILE}` and run `comfysql status remote`."
+    if "timed out waiting for server" in text or "connection failed" in text or "nodename nor servname provided" in text:
+        return "Run `comfysql doctor <server>` to check connectivity and auth."
+    if "workflow file not found" in text or "missing workflow" in text:
+        return "Run `comfysql sql <server> --sql \"SHOW TABLES workflows;\"`."
+    if "missing preset" in text or "unknown preset" in text:
+        return "Run `SHOW PRESETS;` or create one with `CREATE PRESET <name> FOR <workflow> WITH ...;`."
+    if "missing profile" in text or "unknown profile" in text:
+        return "Run `SHOW PROFILES;` or create one with `CREATE PROFILE <name> WITH ...;`."
+    if "character" in text and ("missing" in text or "unknown" in text or "not found" in text):
+        return "Run `SHOW CHARACTERS;` then `DESCRIBE CHARACTER <name>;`."
+    if "object" in text and ("missing" in text or "unknown" in text or "not found" in text):
+        return "Run `SHOW OBJECTS;` then `DESCRIBE OBJECT <name>;`."
+    if "slot" in text and ("missing" in text or "unknown" in text or "not found" in text):
+        return "Create a binding with `CREATE SLOT <slot> FOR <workflow> AS CHARACTER|OBJECT BINDING <node.input>;`."
+    if "sql parse failed" in text or "unsupported sql statement" in text:
+        return "Try `EXPLAIN SELECT ...;` and use ';' at the end for multiline SQL."
+    if "upload_failed" in text or "copy_failed" in text:
+        return "Retry with `comfysql copy-assets <server> --all` and verify `comfysql doctor <server>`."
+    if "download_failed" in text:
+        return "Use a unique `filename_prefix` in WHERE, then retry with `--download-output`."
+    if "missing model" in text or "models" in text and "failed" in text:
+        return "Run `comfysql sync <server>` and then `SHOW MODELS;`."
+    return None
+
+
+def _print_error_with_hint(message: str, *, to_stderr: bool = False) -> None:
+    target = sys.stderr if to_stderr else sys.stdout
+    print(message, file=target, flush=True)
+    hint = _error_hint_for_message(message)
+    if hint:
+        print(f"hint: {hint}", file=target, flush=True)
 
 
 def _is_local_host(host: str) -> bool:
@@ -919,6 +963,7 @@ def _render_sql_result(result: dict[str, Any], table_filter: str = "all") -> Non
         return 0
 
     action = result.get("action")
+    nodes_preview_limit = 12
     if action == "create_table":
         print(f"table_created name={result.get('table')} workflow={result.get('workflow_path')}", flush=True)
         validation = result.get("validation")
@@ -954,6 +999,19 @@ def _render_sql_result(result: dict[str, Any], table_filter: str = "all") -> Non
     if action == "create_profile":
         print(f"profile_created name={result.get('profile_name')}", flush=True)
         return
+    if action == "create_character":
+        print(f"character_created name={result.get('character_name')} image={result.get('image_name')}", flush=True)
+        return
+    if action == "create_object":
+        print(f"object_created name={result.get('object_name')} image={result.get('image_name')}", flush=True)
+        return
+    if action == "create_slot":
+        print(
+            f"slot_created workflow={result.get('workflow_table')} slot={result.get('slot_name')} "
+            f"kind={result.get('slot_kind')} binding={result.get('binding_key')}",
+            flush=True,
+        )
+        return
     if action == "set_meta":
         print(f"meta_set table={result.get('table')}", flush=True)
         return
@@ -973,6 +1031,27 @@ def _render_sql_result(result: dict[str, Any], table_filter: str = "all") -> Non
         print(json.dumps(result, indent=2, ensure_ascii=True), flush=True)
         return
     if action == "describe_profile":
+        print(json.dumps(result, indent=2, ensure_ascii=True), flush=True)
+        return
+    if action == "show_characters":
+        rows = result.get("rows", [])
+        print(f"characters_count={len(rows)}", flush=True)
+        for row in rows:
+            name = row.get("name")
+            workflows = row.get("workflow_count", 0)
+            bindings = row.get("binding_count", 0)
+            print(f"- {name} workflows={workflows} bindings={bindings}", flush=True)
+        return
+    if action == "show_objects":
+        rows = result.get("rows", [])
+        print(f"objects_count={len(rows)}", flush=True)
+        for row in rows:
+            name = row.get("name")
+            workflows = row.get("workflow_count", 0)
+            bindings = row.get("binding_count", 0)
+            print(f"- {name} workflows={workflows} bindings={bindings}", flush=True)
+        return
+    if action in {"describe_character", "describe_object"}:
         print(json.dumps(result, indent=2, ensure_ascii=True), flush=True)
         return
     if action == "drop_table":
@@ -1031,10 +1110,23 @@ def _render_sql_result(result: dict[str, Any], table_filter: str = "all") -> Non
 
         if table_filter in {"all", "nodes"}:
             print("NODES", flush=True)
-            for row in nodes:
-                table = row.get("table")
-                category = row.get("category", "")
-                print(f"- {table} (category={category})", flush=True)
+            if table_filter == "nodes":
+                for row in nodes:
+                    table = row.get("table")
+                    category = row.get("category", "")
+                    print(f"- {table} (category={category})", flush=True)
+            else:
+                preview = nodes[:nodes_preview_limit]
+                for row in preview:
+                    table = row.get("table")
+                    category = row.get("category", "")
+                    print(f"- {table} (category={category})", flush=True)
+                hidden = max(0, len(nodes) - len(preview))
+                if hidden > 0:
+                    print(
+                        f"- ... ({hidden} more nodes hidden). Run `SHOW TABLES nodes;` to view all.",
+                        flush=True,
+                    )
         if table_filter in {"all", "presets"}:
             print("PRESETS", flush=True)
             if presets:
@@ -1075,6 +1167,19 @@ def _render_sql_result(result: dict[str, Any], table_filter: str = "all") -> Non
         return
     if action in {"explain", "compiled"}:
         print(action, flush=True)
+        resolved_layers = result.get("resolved_layers")
+        if isinstance(resolved_layers, dict):
+            preset = str(resolved_layers.get("preset", "") or "")
+            character = str(resolved_layers.get("character", "") or "")
+            obj = str(resolved_layers.get("object", "") or "")
+            profile = str(resolved_layers.get("profile", "") or "")
+            print(
+                f"resolved preset={preset or '-'} character={character or '-'} object={obj or '-'} profile={profile or '-'}",
+                flush=True,
+            )
+            hint = str(resolved_layers.get("hint", "") or "").strip()
+            if hint:
+                print(f"hint: {hint}", flush=True)
         validation = result.get("validation")
         if isinstance(validation, dict) and validation.get("status") == "ok":
             print(
@@ -1090,6 +1195,19 @@ def _render_sql_result(result: dict[str, Any], table_filter: str = "all") -> Non
             print(f"api_prompt: {path}", flush=True)
         return
     if action == "select":
+        resolved_layers = result.get("resolved_layers")
+        if isinstance(resolved_layers, dict):
+            preset = str(resolved_layers.get("preset", "") or "")
+            character = str(resolved_layers.get("character", "") or "")
+            obj = str(resolved_layers.get("object", "") or "")
+            profile = str(resolved_layers.get("profile", "") or "")
+            print(
+                f"resolved preset={preset or '-'} character={character or '-'} object={obj or '-'} profile={profile or '-'}",
+                flush=True,
+            )
+            hint = str(resolved_layers.get("hint", "") or "").strip()
+            if hint:
+                print(f"hint: {hint}", flush=True)
         upload_preflight = result.get("upload_preflight")
         if isinstance(upload_preflight, dict):
             print(
@@ -1137,6 +1255,7 @@ def _render_sql_result_styled(result: dict[str, Any], table_filter: str, ui: Ter
         return 0
 
     action = result.get("action")
+    nodes_preview_limit = 12
     if action in {"create_table", "create_template"}:
         ui.line(
             "[green]" + ("template_created" if action == "create_template" else "table_created") + "[/] "
@@ -1153,8 +1272,40 @@ def _render_sql_result_styled(result: dict[str, Any], table_filter: str, ui: Ter
                 f"checked_assets={_as_count(validation.get('checked_assets'))}"
             )
         return
-    if action in {"describe_preset", "describe_profile", "describe"}:
+    if action in {"describe_preset", "describe_profile", "describe_character", "describe_object", "describe"}:
         ui.print_json(result)
+        return
+    if action == "show_characters":
+        rows = result.get("rows", [])
+        ui.line(f"[bold cyan]characters[/] count={len(rows)}")
+        ui.print_table(
+            "CHARACTERS",
+            ["name", "workflows", "bindings"],
+            [
+                [
+                    str(r.get("name", "")),
+                    str(r.get("workflow_count", 0)),
+                    str(r.get("binding_count", 0)),
+                ]
+                for r in rows
+            ],
+        )
+        return
+    if action == "show_objects":
+        rows = result.get("rows", [])
+        ui.line(f"[bold cyan]objects[/] count={len(rows)}")
+        ui.print_table(
+            "OBJECTS",
+            ["name", "workflows", "bindings"],
+            [
+                [
+                    str(r.get("name", "")),
+                    str(r.get("workflow_count", 0)),
+                    str(r.get("binding_count", 0)),
+                ]
+                for r in rows
+            ],
+        )
         return
 
     if action == "describe_tables":
@@ -1197,11 +1348,20 @@ def _render_sql_result_styled(result: dict[str, Any], table_filter: str, ui: Ter
                 ],
             )
         if table_filter in {"all", "nodes"}:
+            if table_filter == "nodes":
+                node_rows = nodes
+            else:
+                node_rows = nodes[:nodes_preview_limit]
             ui.print_table(
                 "NODES",
                 ["class_type", "category"],
-                [[str(r.get("table", "")), str(r.get("category", ""))] for r in nodes],
+                [[str(r.get("table", "")), str(r.get("category", ""))] for r in node_rows],
             )
+            if table_filter != "nodes" and len(nodes) > len(node_rows):
+                ui.line(
+                    f"[dim]... ({len(nodes) - len(node_rows)} more nodes hidden). "
+                    "Run `SHOW TABLES nodes;` to view all.[/]"
+                )
         if table_filter in {"all", "presets"}:
             ui.print_table(
                 "PRESETS",
@@ -1256,6 +1416,19 @@ def _render_sql_result_styled(result: dict[str, Any], table_filter: str, ui: Ter
 
     if action in {"explain", "compiled"}:
         ui.line(f"[bold blue]{action}[/]")
+        resolved_layers = result.get("resolved_layers")
+        if isinstance(resolved_layers, dict):
+            preset = str(resolved_layers.get("preset", "") or "")
+            character = str(resolved_layers.get("character", "") or "")
+            obj = str(resolved_layers.get("object", "") or "")
+            profile = str(resolved_layers.get("profile", "") or "")
+            ui.line(
+                "[bold cyan]resolved[/] "
+                f"preset={preset or '-'} character={character or '-'} object={obj or '-'} profile={profile or '-'}"
+            )
+            hint = str(resolved_layers.get("hint", "") or "").strip()
+            if hint:
+                ui.line(f"[yellow]hint[/] {hint}")
         validation = result.get("validation")
         if isinstance(validation, dict) and validation.get("status") == "ok":
             ui.line(
@@ -1271,6 +1444,19 @@ def _render_sql_result_styled(result: dict[str, Any], table_filter: str, ui: Ter
         return
 
     if action == "select":
+        resolved_layers = result.get("resolved_layers")
+        if isinstance(resolved_layers, dict):
+            preset = str(resolved_layers.get("preset", "") or "")
+            character = str(resolved_layers.get("character", "") or "")
+            obj = str(resolved_layers.get("object", "") or "")
+            profile = str(resolved_layers.get("profile", "") or "")
+            ui.line(
+                "[bold cyan]resolved[/] "
+                f"preset={preset or '-'} character={character or '-'} object={obj or '-'} profile={profile or '-'}"
+            )
+            hint = str(resolved_layers.get("hint", "") or "").strip()
+            if hint:
+                ui.line(f"[yellow]hint[/] {hint}")
         upload_preflight = result.get("upload_preflight")
         if isinstance(upload_preflight, dict):
             ui.line(
@@ -1326,6 +1512,18 @@ def _confirm_sql_if_needed(sql_text: str, yes: bool) -> None:
 
 
 def _execute_sql_statement(engine: LocalComfySQLEngine, sql_text: str, args: argparse.Namespace, statement_index: int) -> None:
+    report_spec = _parse_report_sql(sql_text)
+    if report_spec is not None:
+        inner_sql, report_path = report_spec
+        _run_sql_report(
+            engine=engine,
+            sql_text=inner_sql,
+            args=args,
+            report_path=Path(report_path).expanduser().resolve(),
+            title=str(getattr(args, "title", "") or "SQL Run Report"),
+            extra_images=[],
+        )
+        return
     _confirm_sql_if_needed(sql_text=sql_text, yes=bool(getattr(args, "yes", False)))
     try:
         result = engine.execute_sql(
@@ -1343,9 +1541,42 @@ def _execute_sql_statement(engine: LocalComfySQLEngine, sql_text: str, args: arg
     _render_sql_result(result, table_filter=getattr(args, "show_tables", "all") or "all")
 
 
+def _is_complete_sql_statement(sql_text: str) -> bool:
+    text = sql_text.strip()
+    if not text:
+        return False
+    try:
+        from comfy_custom.comfysql_runner.sql_parser import SQLParseError, parse_sql
+
+        parse_sql(text)
+        return True
+    except SQLParseError:
+        return False
+    except Exception:
+        return False
+
+
+def _should_auto_execute_without_semicolon(*, sql_text: str, buffered_line_count: int) -> bool:
+    # In interactive mode we keep semicolon-optional for one-liners, but require
+    # an explicit ';' for multi-line input to avoid accidental early execution.
+    if buffered_line_count > 1:
+        return False
+    return _is_complete_sql_statement(sql_text)
+
+SQL_ASCII_ART = "\n".join(
+    [
+        "▄▖     ▐▘  ▄▖▄▖▖ ",
+        "▌ ▛▌▛▛▌▜▘▌▌▚ ▌▌▌ ",
+        "▙▖▙▌▌▌▌▐ ▙▌▄▌█▌▙▖",
+        "         ▄▌   ▘  ",
+    ]
+)
+
+
 def _run_sql_terminal(args: argparse.Namespace, engine: LocalComfySQLEngine) -> int:
     _setup_sql_readline_history()
-    print("ComfySQL terminal. End each statement with ';'. Type '.exit' or '.quit' to leave.", flush=True)
+    print(SQL_ASCII_ART, flush=True)
+    print("ComfySQL terminal. Semicolon ';' is optional. Type '.exit' or '.quit' to leave.", flush=True)
     buf: list[str] = []
     statement_index = 1
 
@@ -1385,7 +1616,7 @@ def _run_sql_terminal(args: argparse.Namespace, engine: LocalComfySQLEngine) -> 
                     statement_index=statement_index,
                 )
             except CliError as exc:
-                print(str(exc), flush=True)
+                _print_error_with_hint(str(exc))
             statement_index += 1
 
         last = statements[-1]
@@ -1398,17 +1629,37 @@ def _run_sql_terminal(args: argparse.Namespace, engine: LocalComfySQLEngine) -> 
                     statement_index=statement_index,
                 )
             except CliError as exc:
-                print(str(exc), flush=True)
+                _print_error_with_hint(str(exc))
             statement_index += 1
             buf = []
         else:
-            buf = [last]
+            if _should_auto_execute_without_semicolon(sql_text=last, buffered_line_count=len(buf)):
+                try:
+                    _execute_sql_statement(
+                        engine=engine,
+                        sql_text=last,
+                        args=args,
+                        statement_index=statement_index,
+                    )
+                except CliError as exc:
+                    _print_error_with_hint(str(exc))
+                statement_index += 1
+                buf = []
+            else:
+                buf = [last]
 
 
 SQL_TERMINAL_HINTS = [
     "SELECT",
     "EXPLAIN",
     "DESCRIBE",
+    "CREATE CHARACTER",
+    "CREATE OBJECT",
+    "CREATE SLOT",
+    "SHOW CHARACTERS",
+    "SHOW OBJECTS",
+    "DESCRIBE CHARACTER",
+    "DESCRIBE OBJECT",
     "SHOW TABLES",
     "CREATE TABLE",
     "DROP TABLE",
@@ -1525,25 +1776,26 @@ def _setup_sql_readline_history() -> None:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
+    _ui().section(f"start server={args.host}:{args.port}")
     state = start_server(host=args.host, port=args.port, timeout=args.start_timeout)
-    print(
+    _ui().success(
         f"server_started pid={state.pid} host={state.host} port={state.port} log={state.log_path}",
-        flush=True,
     )
     if not _REQUEST_HEADERS:
         log("no auth header configured (ok if server is public)")
     models_dir = get_comfy_data_dir() / "models"
     if not _has_synced_models(models_dir):
-        log(
+        _ui().warning(
             "no synced models found under models/. "
             "Run `comfy-agent pull --yes` to sync defaults, or use your own model files."
         )
-    print(f"server_healthy host={args.host} port={args.port}")
+    _ui().success(f"server_healthy host={args.host} port={args.port}")
     return 0
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
     workflow_path = Path(args.workflow).expanduser().resolve()
+    _ui().section(f"submit workflow={workflow_path.name} server={args.host}:{args.port}")
     if not args.skip_validate:
         log("running preflight validation before submit")
         validation_code = validate_workflow(
@@ -1561,10 +1813,12 @@ def cmd_submit(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         no_cache=args.no_cache,
     )
+    _ui().success("submit_done")
     return 0
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
+    _ui().section(f"validate server={args.host}:{args.port}")
     return validate_workflow(
         workflow_path=Path(args.workflow).expanduser().resolve(),
         host=args.host,
@@ -1573,6 +1827,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_sql(args: argparse.Namespace) -> int:
+    _ui().section(f"sql server={args.host}:{args.port}")
     engine = _build_sql_engine(args)
     if bool(getattr(args, "dry_run", False)):
         args.compile_only = True
@@ -1612,16 +1867,175 @@ def cmd_sql(args: argparse.Namespace) -> int:
     return 0
 
 
+def _path_for_markdown(path: Path, *, report_dir: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(report_dir.resolve())).replace("\\", "/")
+    except Exception:
+        return str(path.resolve())
+
+
+def _parse_report_sql(sql_text: str) -> tuple[str, str] | None:
+    text = str(sql_text or "").strip()
+    if not text:
+        return None
+    normalized = text.rstrip().rstrip(";").strip()
+    m = re.match(r"^REPORT\s+(.+)\s+TO\s+(.+)$", normalized, flags=re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    inner_sql = m.group(1).strip()
+    raw_path = m.group(2).strip()
+    if (raw_path.startswith("'") and raw_path.endswith("'")) or (raw_path.startswith('"') and raw_path.endswith('"')):
+        raw_path = raw_path[1:-1]
+    if not inner_sql or not raw_path:
+        raise CliError("Invalid REPORT syntax. Use: REPORT <SQL> TO '<path.md>';", exit_code=2)
+    return inner_sql, raw_path
+
+
+def _run_sql_report(
+    *,
+    engine: LocalComfySQLEngine,
+    sql_text: str,
+    args: argparse.Namespace,
+    report_path: Path,
+    title: str,
+    extra_images: list[str],
+) -> int:
+    from comfy_custom.comfysql_runner.sql_parser import SelectQuery, parse_sql
+
+    start = time.monotonic()
+    try:
+        result = engine.execute_sql(
+            sql=sql_text,
+            compile_only=bool(getattr(args, "compile_only", False)),
+            no_cache=bool(getattr(args, "no_cache", False)),
+            timeout=float(getattr(args, "timeout", DEFAULT_SUBMIT_TIMEOUT)),
+            statement_index=1,
+            download_output=bool(getattr(args, "download_output", True)),
+            download_dir=getattr(args, "download_dir", None),
+            upload_mode=str(getattr(args, "upload_mode", "strict")),
+        )
+    except SQLEngineError as exc:
+        raise CliError(str(exc), exit_code=exc.exit_code) from exc
+    elapsed = time.monotonic() - start
+
+    parsed = parse_sql(sql_text)
+    table_name = ""
+    preset_name = ""
+    character_name = ""
+    object_name = ""
+    profile_name = ""
+    if isinstance(parsed, SelectQuery):
+        table_name = parsed.table_name
+        preset_name = str(parsed.preset_name or "")
+        character_name = str(parsed.character_name or "")
+        object_name = str(getattr(parsed, "object_name", "") or "")
+        profile_name = str(parsed.profile_name or "")
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    downloaded_outputs = result.get("downloaded_outputs", []) if isinstance(result, dict) else []
+    images: list[Path] = []
+    for item in downloaded_outputs if isinstance(downloaded_outputs, list) else []:
+        p = Path(str(item)).expanduser().resolve()
+        if p.exists():
+            images.append(p)
+    for manual in extra_images:
+        p = Path(str(manual)).expanduser().resolve()
+        if p.exists() and p not in images:
+            images.append(p)
+
+    lines: list[str] = []
+    lines.append(f"# {title or 'SQL Run Report'}")
+    lines.append("")
+    lines.append("## Summary")
+    lines.append(f"- Server: `{args.host}:{args.port}`")
+    lines.append(f"- Duration: `{elapsed:.2f}s`")
+    if table_name:
+        lines.append(f"- Table: `{table_name}`")
+    if preset_name:
+        lines.append(f"- Preset: `{preset_name}`")
+    if character_name:
+        lines.append(f"- Character: `{character_name}`")
+    if object_name:
+        lines.append(f"- Object: `{object_name}`")
+    if profile_name:
+        lines.append(f"- Profile: `{profile_name}`")
+    if isinstance(result, dict) and isinstance(result.get("api_prompt_path"), str):
+        lines.append(f"- API Prompt: `{result.get('api_prompt_path')}`")
+    lines.append(f"- Downloaded Outputs: `{len(images)}`")
+    lines.append("")
+    lines.append("## SQL")
+    lines.append("```sql")
+    lines.append(sql_text.strip())
+    lines.append("```")
+    lines.append("")
+    lines.append("## Images")
+    if images:
+        for img in images:
+            md_path = _path_for_markdown(img, report_dir=report_path.parent)
+            lines.append(f"![{img.name}]({md_path})")
+            lines.append("")
+    else:
+        lines.append("No images were available.")
+        lines.append("")
+    lines.append("## Raw Result")
+    lines.append("```json")
+    lines.append(json.dumps(result if isinstance(result, dict) else {"result": result}, indent=2, ensure_ascii=True))
+    lines.append("```")
+    lines.append("")
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    _ui().success(f"report_written path={report_path} duration_s={elapsed:.2f} images={len(images)}")
+    return 0
+
+
+def cmd_sql_report(args: argparse.Namespace) -> int:
+    from comfy_custom.comfysql_runner.sql_parser import SelectQuery, parse_sql
+
+    _ui().section(f"sql-report server={args.host}:{args.port}")
+    engine = _build_sql_engine(args)
+    sql_raw = getattr(args, "sql", None)
+    if sql_raw and args.sql_file:
+        raise CliError("Use either --sql or --sql-file, not both.", exit_code=2)
+    if args.sql_file:
+        sql_path = Path(args.sql_file).expanduser().resolve()
+        if not sql_path.exists():
+            raise CliError(f"SQL file not found: {sql_path}", exit_code=2)
+        sql_raw = sql_path.read_text(encoding="utf-8")
+    if not sql_raw:
+        raise CliError("Provide --sql or --sql-file for sql-report.", exit_code=2)
+
+    statements = _split_sql_statements(sql_raw)
+    if not statements:
+        raise CliError("No SQL statements found.", exit_code=2)
+    if len(statements) != 1:
+        raise CliError("sql-report expects exactly one SQL statement.", exit_code=2)
+    sql_text = statements[0]
+    report_path = Path(getattr(args, "report", "") or "").expanduser().resolve() if getattr(args, "report", None) else (
+        (Path.cwd() / "reports" / f"sql_run_{int(time.time())}.md").resolve()
+    )
+    title = str(getattr(args, "title", "") or "").strip() or "SQL Run Report"
+    extra_images = [str(x) for x in (getattr(args, "image", None) or [])]
+    return _run_sql_report(
+        engine=engine,
+        sql_text=sql_text,
+        args=args,
+        report_path=report_path,
+        title=title,
+        extra_images=extra_images,
+    )
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     healthy = is_server_healthy(args.host, args.port, timeout=1.5)
     if healthy:
-        print(f"status=running_remote host={args.host} port={args.port}")
+        _ui().success(f"status=running_remote host={args.host} port={args.port}")
     else:
-        print(f"status=stopped_remote host={args.host} port={args.port}")
+        _ui().warning(f"status=stopped_remote host={args.host} port={args.port}")
+        _ui().hint(f"Run `comfysql doctor {args.host}` or `comfysql status remote`.")
     return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    _ui().section(f"doctor server={args.host}:{args.port}")
     checks: list[tuple[str, bool, str]] = []
     base = f"{_HTTP_SCHEME}://{args.host}:{args.port}"
     timeout = float(getattr(args, "timeout", 5.0) or 5.0)
@@ -1672,14 +2086,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     failed = 0
     for name, ok, detail in checks:
         status = "ok" if ok else "fail"
-        print(f"doctor {name}={status} detail={detail}", flush=True)
+        if ok:
+            _ui().success(f"doctor {name}={status} detail={detail}")
+        else:
+            _ui().error(f"doctor {name}={status} detail={detail}")
         if not ok:
             failed += 1
 
     if failed:
-        print(f"doctor_summary status=fail failed_checks={failed}", flush=True)
+        _ui().error(f"doctor_summary status=fail failed_checks={failed}")
+        _ui().hint(f"Run `comfysql status {args.host}` after fixing connectivity/auth.")
         return 3
-    print("doctor_summary status=ok failed_checks=0", flush=True)
+    _ui().success("doctor_summary status=ok failed_checks=0")
     return 0
 
 
@@ -1718,11 +2136,14 @@ def cmd_pull(args: argparse.Namespace) -> int:
     except PullError as exc:
         raise CliError(str(exc), exit_code=exc.exit_code) from exc
 
-    print(
+    if report.failed:
+        _ui().warning("pull finished with failures")
+    else:
+        _ui().success("pull finished")
+    _ui().line(
         "pull_done "
         f"copied={report.copied} skipped_exists={report.skipped_exists} failed={report.failed} "
         f"bytes_copied={report.bytes_copied} dry_run={'true' if report.dry_run else 'false'}",
-        flush=True,
     )
     return 4 if report.failed else 0
 
@@ -1739,12 +2160,35 @@ def _default_assets_dir() -> Path:
 
 def _collect_asset_files(*, source: str | None, all_assets: bool) -> list[Path]:
     if all_assets:
+        workspace_root = _find_workspace_root().resolve()
         assets_dir = _default_assets_dir()
-        if not assets_dir.exists() or not assets_dir.is_dir():
-            raise CliError(f"Assets folder not found: {assets_dir}", exit_code=2)
-        files = sorted([p for p in assets_dir.rglob("*") if p.is_file()])
+        input_dir = (workspace_root / "input").resolve()
+        files: list[Path] = []
+
+        # Canonical location: input/assets (supports nested folders).
+        if assets_dir.exists() and assets_dir.is_dir():
+            files.extend(sorted([p for p in assets_dir.rglob("*") if p.is_file() and not p.name.startswith(".")]))
+
+        # Backward-compatible location: top-level input/ files (excluding hidden files).
+        legacy_files: list[Path] = []
+        if input_dir.exists() and input_dir.is_dir():
+            for entry in sorted(input_dir.iterdir(), key=lambda p: p.name.lower()):
+                if entry.is_file() and not entry.name.startswith("."):
+                    legacy_files.append(entry)
+
+        # De-duplicate by filename so canonical input/assets wins when both exist.
+        seen_names = {p.name for p in files}
+        for legacy in legacy_files:
+            if legacy.name in seen_names:
+                continue
+            files.append(legacy)
+            seen_names.add(legacy.name)
+
         if not files:
-            raise CliError(f"No files found under assets folder: {assets_dir}", exit_code=2)
+            raise CliError(
+                f"No asset files found in canonical '{assets_dir}' or legacy '{input_dir}'.",
+                exit_code=2,
+            )
         return files
 
     if not source:
@@ -1775,9 +2219,10 @@ def cmd_copy_assets(args: argparse.Namespace) -> int:
     )
 
     if args.dry_run:
-        print(f"copy_assets_plan files={len(files)} mode=http_upload", flush=True)
+        _ui().section(f"copy-assets dry-run server={args.host}:{args.port}")
+        _ui().line(f"copy_assets_plan files={len(files)} mode=http_upload")
         for f in files:
-            print(f"- {f}", flush=True)
+            _ui().line(f"- {f}")
         return 0
 
     engine = _build_sql_engine(args)
@@ -1796,15 +2241,74 @@ def cmd_copy_assets(args: argparse.Namespace) -> int:
     uploaded = int(report.get("uploaded_count", 0))
     skipped = int(report.get("skipped_existing_count", 0))
     failed = int(report.get("failed_count", 0))
-    print(f"copy_assets_done uploaded={uploaded} skipped_existing={skipped} failed={failed}", flush=True)
+    if failed > 0:
+        _ui().warning("copy-assets completed with failures")
+    else:
+        _ui().success("copy-assets completed")
+    _ui().line(f"copy_assets_done uploaded={uploaded} skipped_existing={skipped} failed={failed}")
     for item in report.get("failed", []) or []:
-        print(
+        _ui().error(
             f"- copy_failed local={item.get('local_path')} remote={item.get('remote_path')} "
             f"error={item.get('error')}",
-            flush=True,
         )
     if failed > 0:
+        _ui().hint("Run `comfysql doctor <server>` and retry `comfysql copy-assets <server> --all`.")
+    if failed > 0:
         return 4
+    return 0
+
+
+def _sql_quote(text: str) -> str:
+    return text.replace("'", "''")
+
+
+def cmd_bind_character(args: argparse.Namespace) -> int:
+    engine = _build_sql_engine(args)
+    workflow = str(getattr(args, "workflow", "") or "").strip()
+    character = str(getattr(args, "character", "") or "").strip()
+    image_raw = str(getattr(args, "image", "") or "").strip()
+    binding = str(getattr(args, "binding", "input_image") or "input_image").strip()
+    do_upload = bool(getattr(args, "upload", False))
+    timeout = float(getattr(args, "timeout", DEFAULT_SUBMIT_TIMEOUT))
+
+    if not workflow or not character or not image_raw:
+        raise CliError("bind-character requires --workflow, --character, and --image.", exit_code=2)
+
+    mapped_image = image_raw
+    upload_report: dict[str, Any] | None = None
+    if do_upload:
+        prompt = {"1": {"class_type": "LoadImage", "inputs": {"image": image_raw}}}
+        try:
+            patched, upload_report = engine._auto_upload_local_assets(prompt, timeout=timeout)
+        except SQLEngineError as exc:
+            raise CliError(str(exc), exit_code=exc.exit_code) from exc
+        mapped_value = patched.get("1", {}).get("inputs", {}).get("image")
+        if isinstance(mapped_value, str) and mapped_value.strip():
+            mapped_image = mapped_value.strip()
+
+    try:
+        spec = engine.upsert_character_binding(
+            workflow_table=workflow,
+            character_name=character,
+            binding_key=binding,
+            binding_value=mapped_image,
+        )
+        action = "upserted"
+    except SQLEngineError as exc:
+        raise CliError(str(exc), exit_code=exc.exit_code) from exc
+
+    print(
+        f"character_bound action={action} workflow={spec.workflow_table} character={spec.character_name} "
+        f"binding={spec.binding_key} image={spec.binding_value}",
+        flush=True,
+    )
+    if isinstance(upload_report, dict):
+        print(
+            f"upload_preflight uploaded={upload_report.get('uploaded_count', 0)} "
+            f"skipped_existing={upload_report.get('skipped_existing_count', 0)} "
+            f"failed={upload_report.get('failed_count', 0)}",
+            flush=True,
+        )
     return 0
 
 
@@ -1863,6 +2367,7 @@ def _sync_schema_and_models(
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
+    _ui().section(f"sync server={args.host}:{args.port}")
     log("syncing nodes and models")
     report = _sync_schema_and_models(
         host=args.host,
@@ -1872,13 +2377,51 @@ def cmd_sync(args: argparse.Namespace) -> int:
         write_report=True,
     )
 
-    print(
+    _ui().success("sync completed")
+    _ui().line(
         f"sync_done schema_tables={report['schema_tables']} "
         f"models={report['models_count']} "
         f"categories={len(report.get('categories', []))} "
         f"report={report.get('report_path', '')}",
-        flush=True,
     )
+    return 0
+
+
+def _resolve_download_url(raw_url: str, *, host: str, port: int) -> str:
+    text = str(raw_url or "").strip()
+    if not text:
+        raise CliError("Provide --url for download.", exit_code=2)
+    if text.startswith("http://") or text.startswith("https://"):
+        return text
+    if text.startswith("/"):
+        return _http_url(host, port, text)
+    if text.startswith("view?"):
+        return _http_url(host, port, f"/{text}")
+    raise CliError("Download URL must be absolute (http/https) or start with /view? or view?.", exit_code=2)
+
+
+def cmd_download(args: argparse.Namespace) -> int:
+    _ui().section(f"download server={args.host}:{args.port}")
+    url = _resolve_download_url(str(getattr(args, "url", "")), host=args.host, port=args.port)
+    out_arg = str(getattr(args, "output", "") or "").strip()
+    if out_arg:
+        out_path = Path(out_arg).expanduser().resolve()
+    else:
+        parsed = parse.urlparse(url)
+        q = parse.parse_qs(parsed.query)
+        filename = ""
+        values = q.get("filename")
+        if isinstance(values, list) and values and isinstance(values[0], str):
+            filename = values[0]
+        out_path = (Path.cwd() / (filename or "download.bin")).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with urlopen_with_auth_fallback(url, method="GET", headers=_request_headers(), timeout=float(getattr(args, "timeout", 30.0))) as resp:
+            raw = resp.read()
+    except Exception as exc:
+        raise CliError(f"download_failed url={url} error={exc}", exit_code=4) from exc
+    out_path.write_bytes(raw)
+    _ui().success(f"downloaded path={out_path} bytes={len(raw)}")
     return 0
 
 
@@ -1889,12 +2432,13 @@ def cmd_config_init(args: argparse.Namespace) -> int:
     payload = _build_default_config_payload()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(f"config_written path={path}")
+    _ui().success(f"config_written path={path}")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="comfy-agent", description="Custom Comfy server CLI")
+    prog_name = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "comfy-agent"
+    parser = argparse.ArgumentParser(prog=prog_name, description="Custom Comfy server CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     status_cmd = sub.add_parser("status", help="Show target server status (remote-only)")
@@ -1948,6 +2492,30 @@ def build_parser() -> argparse.ArgumentParser:
     copy_assets_cmd.add_argument("--dry-run", action="store_true", help="Show files that would be uploaded")
     copy_assets_cmd.set_defaults(func=cmd_copy_assets)
 
+    bind_character_cmd = sub.add_parser(
+        "bind-character",
+        help="Create or update a relational character binding (for example char_nick) for a workflow input.",
+    )
+    bind_character_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
+    bind_character_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
+    bind_character_cmd.add_argument("--host", default=DEFAULT_HOST)
+    bind_character_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
+    bind_character_cmd.add_argument("--timeout", type=float, default=DEFAULT_SUBMIT_TIMEOUT)
+    bind_character_cmd.add_argument("--workflow", required=True, help="Workflow table name (for example: img2img_controlnet).")
+    bind_character_cmd.add_argument("--character", required=True, help="Character alias (for example: char_nick).")
+    bind_character_cmd.add_argument("--image", required=True, help="Image filename/path (for example: nick.jpg.avif).")
+    bind_character_cmd.add_argument(
+        "--binding",
+        default="input_image",
+        help="Workflow bind key (default: input_image). For multi-input workflows you can use keys like 198.image.",
+    )
+    bind_character_cmd.add_argument(
+        "--upload",
+        action="store_true",
+        help="Attempt to auto-upload local image before binding preset value.",
+    )
+    bind_character_cmd.set_defaults(func=cmd_bind_character)
+
     sync_cmd = sub.add_parser("sync", help="Sync node schema and model inventory from server")
     sync_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
     sync_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
@@ -1956,6 +2524,16 @@ def build_parser() -> argparse.ArgumentParser:
     sync_cmd.add_argument("--start-timeout", type=float, default=DEFAULT_START_TIMEOUT)
     sync_cmd.add_argument("--timeout", type=float, default=DEFAULT_SUBMIT_TIMEOUT)
     sync_cmd.set_defaults(func=cmd_sync)
+
+    download_cmd = sub.add_parser("download", help="Download a file from Comfy endpoint URL (for example /view?...).")
+    download_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
+    download_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
+    download_cmd.add_argument("--host", default=DEFAULT_HOST)
+    download_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
+    download_cmd.add_argument("--url", required=True, help="Absolute URL, /view?... path, or view?... query path.")
+    download_cmd.add_argument("--output", help="Local output file path (defaults to query filename or ./download.bin).")
+    download_cmd.add_argument("--timeout", type=float, default=30.0)
+    download_cmd.set_defaults(func=cmd_download)
 
     submit_cmd = sub.add_parser("submit", help="Submit workflow JSON")
     submit_cmd.add_argument("workflow", help="Path to API prompt workflow JSON")
@@ -2013,6 +2591,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sql_cmd.set_defaults(func=cmd_sql)
 
+    sql_report_cmd = sub.add_parser("sql-report", help="Run one SQL statement and export a Markdown run report.")
+    sql_report_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
+    sql_report_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
+    sql_report_cmd.add_argument("--sql", help="Single ComfySQL statement text")
+    sql_report_cmd.add_argument("--sql-file", help="Path to file containing exactly one SQL statement")
+    sql_report_cmd.add_argument("--host", default=DEFAULT_HOST)
+    sql_report_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
+    sql_report_cmd.add_argument("--timeout", type=float, default=DEFAULT_SUBMIT_TIMEOUT)
+    sql_report_cmd.add_argument("--no-cache", action="store_true")
+    sql_report_cmd.add_argument("--compile-only", action="store_true")
+    sql_report_cmd.add_argument("--upload-mode", choices=["strict", "warn", "off"], default="strict")
+    sql_report_cmd.add_argument("--download-output", action="store_true", default=True)
+    sql_report_cmd.add_argument("--download-dir", help="Local folder to save downloaded outputs (default: ./output).")
+    sql_report_cmd.add_argument("--report", help="Output markdown path (default: ./reports/sql_run_<timestamp>.md)")
+    sql_report_cmd.add_argument("--title", help="Optional markdown report title")
+    sql_report_cmd.add_argument("--image", action="append", help="Extra image path(s) to embed in the report")
+    sql_report_cmd.set_defaults(func=cmd_sql_report)
+
     config_cmd = sub.add_parser("config", help="Manage comfy-agent config")
     config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
     config_init = config_sub.add_parser("init", help="Write a starter config file")
@@ -2031,7 +2627,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except CliError as exc:
-        print(str(exc), file=sys.stderr)
+        _print_error_with_hint(str(exc), to_stderr=True)
         return exc.exit_code
     except KeyboardInterrupt:
         # Respect Ctrl-C for foreground command control.

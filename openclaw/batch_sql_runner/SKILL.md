@@ -2,7 +2,7 @@
 name: batch_sql_runner
 description: Run one or more SQL files in batch mode with consistent server targeting and failure behavior.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🗂️","requires":{"bins":["comfy-agent","bash"]}}}
+metadata: {"openclaw":{"emoji":"🗂️","requires":{"bins":["comfysql","bash"]}}}
 ---
 
 # batch_sql_runner
@@ -11,7 +11,7 @@ Use this skill to run SQL packs as reproducible batches.
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - SQL files exist and are readable.
 
 ## Execution

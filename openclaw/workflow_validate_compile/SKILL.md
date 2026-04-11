@@ -2,7 +2,7 @@
 name: workflow_validate_compile
 description: Validate ComfySQL workflow execution plans safely using EXPLAIN and compile-only runs before submit.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"✅","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"✅","requires":{"bins":["comfysql"]}}}
 ---
 
 # workflow_validate_compile
@@ -11,7 +11,7 @@ Use this skill to validate and inspect SQL workflow queries without generating o
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Target workflow table already exists.
 
 ## Execution
@@ -22,7 +22,7 @@ Run the SQL examples in:
 
 Then run:
 
-- `comfy-agent sql remote --compile-only --sql-file ${REPO_ROOT}/openclaw/workflow_validate_compile/workflow_validate_compile.sql`
+- `comfysql sql remote --compile-only --sql-file ${REPO_ROOT}/openclaw/workflow_validate_compile/workflow_validate_compile.sql`
 
 ## Expected Output
 

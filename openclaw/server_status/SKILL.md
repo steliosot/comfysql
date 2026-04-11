@@ -1,8 +1,8 @@
 ---
 name: server_status
-description: Check remote/server health quickly using comfy-agent status with alias-based targets.
+description: Check remote/server health quickly using comfysql status with alias-based targets.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🟢","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🟢","requires":{"bins":["comfysql"]}}}
 ---
 
 # server_status
@@ -11,7 +11,7 @@ Use this skill for a fast up/down connectivity check before running SQL or asset
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Server alias exists in config (for example `remote`).
 
 ## Execution

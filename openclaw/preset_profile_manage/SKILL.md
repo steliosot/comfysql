@@ -2,7 +2,7 @@
 name: preset_profile_manage
 description: Inspect and manage existing ComfySQL presets and profiles without creating new ones.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🎛️","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🎛️","requires":{"bins":["comfysql"]}}}
 ---
 
 # preset_profile_manage
@@ -11,7 +11,7 @@ Use this skill for preset/profile inspection and cleanup workflows.
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 
 ## Execution
 

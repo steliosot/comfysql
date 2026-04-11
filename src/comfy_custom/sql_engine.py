@@ -50,6 +50,35 @@ class ProfileSpec:
 
 
 @dataclass
+class CharacterBindingSpec:
+    workflow_table: str
+    character_name: str
+    binding_key: str
+    binding_value: Any
+    created_at: float
+    updated_at: float
+
+
+@dataclass
+class AssetAliasSpec:
+    alias_name: str
+    kind: str
+    image_name: str
+    created_at: float
+    updated_at: float
+
+
+@dataclass
+class WorkflowSlotSpec:
+    workflow_table: str
+    slot_name: str
+    slot_kind: str
+    binding_key: str
+    created_at: float
+    updated_at: float
+
+
+@dataclass
 class QueryMacroSpec:
     name: str
     sql_text: str
@@ -406,6 +435,306 @@ class ProfileRegistry:
         return sorted(self._profiles.values(), key=lambda s: s.profile_name.lower())
 
 
+class CharacterBindingRegistry:
+    def __init__(self, registry_path: Path) -> None:
+        self.registry_path = registry_path
+        self._bindings: dict[tuple[str, str, str], CharacterBindingSpec] = {}
+        self._loaded = False
+        self._migrated = False
+
+    def load(self) -> None:
+        if self._loaded:
+            return
+        if not self.registry_path.exists():
+            self._loaded = True
+            return
+        try:
+            data = json.loads(self.registry_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise SQLEngineError(f"Failed to read SQL character binding registry: {exc}", exit_code=3) from exc
+
+        if not isinstance(data, dict):
+            raise SQLEngineError(
+                f"Invalid SQL character binding registry payload (expected object): {self.registry_path}",
+                exit_code=3,
+            )
+        version = int(data.get("version", 1))
+        if version > REGISTRY_SCHEMA_VERSION:
+            raise SQLEngineError(
+                f"SQL character binding registry version {version} is newer than supported {REGISTRY_SCHEMA_VERSION}.",
+                exit_code=3,
+            )
+        if version <= 1:
+            self._migrated = True
+
+        for row in data.get("bindings", []):
+            if not isinstance(row, dict):
+                continue
+            workflow_table = str(row.get("workflow_table", "")).strip()
+            character_name = str(row.get("character_name", "")).strip()
+            binding_key = str(row.get("binding_key", "")).strip()
+            if not workflow_table or not character_name or not binding_key:
+                continue
+            spec = CharacterBindingSpec(
+                workflow_table=workflow_table,
+                character_name=character_name,
+                binding_key=binding_key,
+                binding_value=row.get("binding_value"),
+                created_at=float(row.get("created_at", 0.0)),
+                updated_at=float(row.get("updated_at", 0.0)),
+            )
+            self._bindings[(workflow_table.lower(), character_name.lower(), binding_key.lower())] = spec
+        self._loaded = True
+        if self._migrated:
+            self.save()
+
+    def save(self) -> None:
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": REGISTRY_SCHEMA_VERSION,
+            "bindings": [
+                {
+                    "workflow_table": spec.workflow_table,
+                    "character_name": spec.character_name,
+                    "binding_key": spec.binding_key,
+                    "binding_value": spec.binding_value,
+                    "created_at": spec.created_at,
+                    "updated_at": spec.updated_at,
+                }
+                for spec in sorted(
+                    self._bindings.values(),
+                    key=lambda s: (s.workflow_table.lower(), s.character_name.lower(), s.binding_key.lower()),
+                )
+            ],
+        }
+        self.registry_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self._migrated = False
+
+    def upsert(
+        self,
+        *,
+        workflow_table: str,
+        character_name: str,
+        binding_key: str,
+        binding_value: Any,
+    ) -> CharacterBindingSpec:
+        self.load()
+        now = time.time()
+        key = (workflow_table.lower(), character_name.lower(), binding_key.lower())
+        existing = self._bindings.get(key)
+        spec = CharacterBindingSpec(
+            workflow_table=workflow_table,
+            character_name=character_name,
+            binding_key=binding_key,
+            binding_value=binding_value,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+        self._bindings[key] = spec
+        self.save()
+        return spec
+
+    def list(self) -> list[CharacterBindingSpec]:
+        self.load()
+        return sorted(
+            self._bindings.values(),
+            key=lambda s: (s.workflow_table.lower(), s.character_name.lower(), s.binding_key.lower()),
+        )
+
+    def list_for(self, *, workflow_table: str, character_name: str) -> list[CharacterBindingSpec]:
+        self.load()
+        wf = workflow_table.lower()
+        ch = character_name.lower()
+        out = [spec for (w, c, _), spec in self._bindings.items() if w == wf and c == ch]
+        return sorted(out, key=lambda s: s.binding_key.lower())
+
+    def has_character(self, *, character_name: str) -> bool:
+        self.load()
+        ch = character_name.lower()
+        return any(c == ch for (_w, c, _k) in self._bindings.keys())
+
+
+class AssetAliasRegistry:
+    def __init__(self, registry_path: Path) -> None:
+        self.registry_path = registry_path
+        self._aliases: dict[str, AssetAliasSpec] = {}
+        self._loaded = False
+
+    def load(self) -> None:
+        if self._loaded:
+            return
+        if not self.registry_path.exists():
+            self._loaded = True
+            return
+        try:
+            data = json.loads(self.registry_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise SQLEngineError(f"Failed to read SQL asset alias registry: {exc}", exit_code=3) from exc
+        if not isinstance(data, dict):
+            raise SQLEngineError(
+                f"Invalid SQL asset alias registry payload (expected object): {self.registry_path}",
+                exit_code=3,
+            )
+        version = int(data.get("version", 1))
+        if version > REGISTRY_SCHEMA_VERSION:
+            raise SQLEngineError(
+                f"SQL asset alias registry version {version} is newer than supported {REGISTRY_SCHEMA_VERSION}.",
+                exit_code=3,
+            )
+        for row in data.get("aliases", []):
+            if not isinstance(row, dict):
+                continue
+            alias_name = str(row.get("alias_name", "")).strip()
+            kind = str(row.get("kind", "")).strip().lower()
+            image_name = str(row.get("image_name", "")).strip()
+            if not alias_name or kind not in {"character", "object"} or not image_name:
+                continue
+            self._aliases[alias_name.lower()] = AssetAliasSpec(
+                alias_name=alias_name,
+                kind=kind,
+                image_name=image_name,
+                created_at=float(row.get("created_at", 0.0)),
+                updated_at=float(row.get("updated_at", 0.0)),
+            )
+        self._loaded = True
+
+    def save(self) -> None:
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": REGISTRY_SCHEMA_VERSION,
+            "aliases": [
+                {
+                    "alias_name": spec.alias_name,
+                    "kind": spec.kind,
+                    "image_name": spec.image_name,
+                    "created_at": spec.created_at,
+                    "updated_at": spec.updated_at,
+                }
+                for spec in sorted(self._aliases.values(), key=lambda s: s.alias_name.lower())
+            ],
+        }
+        self.registry_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def upsert(self, *, alias_name: str, kind: str, image_name: str) -> AssetAliasSpec:
+        self.load()
+        now = time.time()
+        key = alias_name.lower()
+        existing = self._aliases.get(key)
+        spec = AssetAliasSpec(
+            alias_name=alias_name,
+            kind=kind,
+            image_name=image_name,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+        self._aliases[key] = spec
+        self.save()
+        return spec
+
+    def get(self, alias_name: str) -> AssetAliasSpec | None:
+        self.load()
+        return self._aliases.get(alias_name.lower())
+
+    def list(self, *, kind: str | None = None) -> list[AssetAliasSpec]:
+        self.load()
+        out = list(self._aliases.values())
+        if kind:
+            out = [spec for spec in out if spec.kind == kind]
+        return sorted(out, key=lambda s: s.alias_name.lower())
+
+
+class WorkflowSlotRegistry:
+    def __init__(self, registry_path: Path) -> None:
+        self.registry_path = registry_path
+        self._slots: dict[tuple[str, str], WorkflowSlotSpec] = {}
+        self._loaded = False
+
+    def load(self) -> None:
+        if self._loaded:
+            return
+        if not self.registry_path.exists():
+            self._loaded = True
+            return
+        try:
+            data = json.loads(self.registry_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise SQLEngineError(f"Failed to read SQL workflow slot registry: {exc}", exit_code=3) from exc
+        if not isinstance(data, dict):
+            raise SQLEngineError(
+                f"Invalid SQL workflow slot registry payload (expected object): {self.registry_path}",
+                exit_code=3,
+            )
+        version = int(data.get("version", 1))
+        if version > REGISTRY_SCHEMA_VERSION:
+            raise SQLEngineError(
+                f"SQL workflow slot registry version {version} is newer than supported {REGISTRY_SCHEMA_VERSION}.",
+                exit_code=3,
+            )
+        for row in data.get("slots", []):
+            if not isinstance(row, dict):
+                continue
+            workflow_table = str(row.get("workflow_table", "")).strip()
+            slot_name = str(row.get("slot_name", "")).strip()
+            slot_kind = str(row.get("slot_kind", "")).strip().lower()
+            binding_key = str(row.get("binding_key", "")).strip()
+            if not workflow_table or not slot_name or slot_kind not in {"character", "object"} or not binding_key:
+                continue
+            self._slots[(workflow_table.lower(), slot_name.lower())] = WorkflowSlotSpec(
+                workflow_table=workflow_table,
+                slot_name=slot_name,
+                slot_kind=slot_kind,
+                binding_key=binding_key,
+                created_at=float(row.get("created_at", 0.0)),
+                updated_at=float(row.get("updated_at", 0.0)),
+            )
+        self._loaded = True
+
+    def save(self) -> None:
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": REGISTRY_SCHEMA_VERSION,
+            "slots": [
+                {
+                    "workflow_table": spec.workflow_table,
+                    "slot_name": spec.slot_name,
+                    "slot_kind": spec.slot_kind,
+                    "binding_key": spec.binding_key,
+                    "created_at": spec.created_at,
+                    "updated_at": spec.updated_at,
+                }
+                for spec in sorted(self._slots.values(), key=lambda s: (s.workflow_table.lower(), s.slot_name.lower()))
+            ],
+        }
+        self.registry_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def upsert(self, *, workflow_table: str, slot_name: str, slot_kind: str, binding_key: str) -> WorkflowSlotSpec:
+        self.load()
+        now = time.time()
+        key = (workflow_table.lower(), slot_name.lower())
+        existing = self._slots.get(key)
+        spec = WorkflowSlotSpec(
+            workflow_table=workflow_table,
+            slot_name=slot_name,
+            slot_kind=slot_kind,
+            binding_key=binding_key,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+        self._slots[key] = spec
+        self.save()
+        return spec
+
+    def list(self) -> list[WorkflowSlotSpec]:
+        self.load()
+        return sorted(self._slots.values(), key=lambda s: (s.workflow_table.lower(), s.slot_name.lower()))
+
+    def list_for_workflow_kind(self, *, workflow_table: str, slot_kind: str) -> list[WorkflowSlotSpec]:
+        self.load()
+        wf = workflow_table.lower()
+        out = [spec for (w, _s), spec in self._slots.items() if w == wf and spec.slot_kind == slot_kind]
+        return sorted(out, key=lambda s: s.slot_name.lower())
+
+
 class QueryMacroRegistry:
     def __init__(self, registry_path: Path) -> None:
         self.registry_path = registry_path
@@ -542,6 +871,9 @@ class LocalComfySQLEngine:
         self.registry = WorkflowRegistry(state_dir / "sql_registry.json")
         self.preset_registry = PresetRegistry(state_dir / "sql_presets.json")
         self.profile_registry = ProfileRegistry(state_dir / "sql_profiles.json")
+        self.character_binding_registry = CharacterBindingRegistry(state_dir / "sql_character_bindings.json")
+        self.asset_alias_registry = AssetAliasRegistry(state_dir / "sql_asset_aliases.json")
+        self.workflow_slot_registry = WorkflowSlotRegistry(state_dir / "sql_workflow_slots.json")
         self.query_registry = QueryMacroRegistry(state_dir / "sql_queries.json")
         self._schema_store = None
         self._catalog = None
@@ -759,14 +1091,19 @@ class LocalComfySQLEngine:
             from comfy_custom.comfysql_runner.sql_parser import (
                 AlterPresetQuery,
                 AlterProfileQuery,
+                CreateCharacterQuery,
+                CreateObjectQuery,
                 CreatePresetDefaultsQuery,
                 CreatePresetQuery,
                 CreateProfileQuery,
                 CreateQueryMacroQuery,
+                CreateWorkflowSlotQuery,
                 CreateWorkflowTableQuery,
                 DescribeQueryMacroQuery,
                 DescribePresetQuery,
                 DescribeProfileQuery,
+                DescribeCharacterQuery,
+                DescribeObjectQuery,
                 DescribeQuery,
                 DescribeTablesQuery,
                 DropQueryMacroQuery,
@@ -780,6 +1117,8 @@ class LocalComfySQLEngine:
                 SQLParseError,
                 SelectQuery,
                 ShowQueriesQuery,
+                ShowCharactersQuery,
+                ShowObjectsQuery,
                 UnsetMetaQuery,
                 parse_sql,
             )
@@ -800,13 +1139,18 @@ class LocalComfySQLEngine:
             "CreatePresetDefaultsQuery": CreatePresetDefaultsQuery,
             "AlterPresetQuery": AlterPresetQuery,
             "AlterProfileQuery": AlterProfileQuery,
+            "CreateCharacterQuery": CreateCharacterQuery,
+            "CreateObjectQuery": CreateObjectQuery,
             "CreatePresetQuery": CreatePresetQuery,
             "CreateProfileQuery": CreateProfileQuery,
             "CreateQueryMacroQuery": CreateQueryMacroQuery,
+            "CreateWorkflowSlotQuery": CreateWorkflowSlotQuery,
             "CreateWorkflowTableQuery": CreateWorkflowTableQuery,
             "DescribeQueryMacroQuery": DescribeQueryMacroQuery,
             "DescribePresetQuery": DescribePresetQuery,
             "DescribeProfileQuery": DescribeProfileQuery,
+            "DescribeCharacterQuery": DescribeCharacterQuery,
+            "DescribeObjectQuery": DescribeObjectQuery,
             "DescribeTablesQuery": DescribeTablesQuery,
             "DropQueryMacroQuery": DropQueryMacroQuery,
             "DropTableQuery": DropTableQuery,
@@ -819,6 +1163,8 @@ class LocalComfySQLEngine:
             "SQLParseError": SQLParseError,
             "SelectQuery": SelectQuery,
             "ShowQueriesQuery": ShowQueriesQuery,
+            "ShowCharactersQuery": ShowCharactersQuery,
+            "ShowObjectsQuery": ShowObjectsQuery,
             "UnsetMetaQuery": UnsetMetaQuery,
             "parse_sql": parse_sql,
             "get_template": get_template,
@@ -874,14 +1220,19 @@ class LocalComfySQLEngine:
         CreatePresetDefaultsQuery = modules["CreatePresetDefaultsQuery"]
         AlterPresetQuery = modules["AlterPresetQuery"]
         AlterProfileQuery = modules["AlterProfileQuery"]
+        CreateCharacterQuery = modules["CreateCharacterQuery"]
+        CreateObjectQuery = modules["CreateObjectQuery"]
         DescribeQuery = modules["DescribeQuery"]
         CreatePresetQuery = modules["CreatePresetQuery"]
         CreateProfileQuery = modules["CreateProfileQuery"]
         CreateQueryMacroQuery = modules["CreateQueryMacroQuery"]
+        CreateWorkflowSlotQuery = modules["CreateWorkflowSlotQuery"]
         CreateWorkflowTableQuery = modules["CreateWorkflowTableQuery"]
         DescribeQueryMacroQuery = modules["DescribeQueryMacroQuery"]
         DescribePresetQuery = modules["DescribePresetQuery"]
         DescribeProfileQuery = modules["DescribeProfileQuery"]
+        DescribeCharacterQuery = modules["DescribeCharacterQuery"]
+        DescribeObjectQuery = modules["DescribeObjectQuery"]
         DropQueryMacroQuery = modules["DropQueryMacroQuery"]
         DropTableQuery = modules["DropTableQuery"]
         DropPresetQuery = modules["DropPresetQuery"]
@@ -891,6 +1242,8 @@ class LocalComfySQLEngine:
         RunQueryMacroQuery = modules["RunQueryMacroQuery"]
         SetMetaQuery = modules["SetMetaQuery"]
         ShowQueriesQuery = modules["ShowQueriesQuery"]
+        ShowCharactersQuery = modules["ShowCharactersQuery"]
+        ShowObjectsQuery = modules["ShowObjectsQuery"]
         SelectQuery = modules["SelectQuery"]
         SQLParseError = modules["SQLParseError"]
         UnsetMetaQuery = modules["UnsetMetaQuery"]
@@ -984,6 +1337,66 @@ class LocalComfySQLEngine:
                 for spec in self.query_registry.list()
             ]
             return {"action": "show_queries", "rows": rows}
+
+        if isinstance(query, ShowCharactersQuery):
+            rows = self._alias_summary_rows(object_mode=False)
+            return {"action": "show_characters", "rows": rows}
+
+        if isinstance(query, ShowObjectsQuery):
+            rows = self._alias_summary_rows(object_mode=True)
+            return {"action": "show_objects", "rows": rows}
+
+        if isinstance(query, DescribeCharacterQuery):
+            details = self._describe_alias(alias_name=query.character_name, object_mode=False)
+            details["action"] = "describe_character"
+            return details
+
+        if isinstance(query, DescribeObjectQuery):
+            details = self._describe_alias(alias_name=query.object_name, object_mode=True)
+            details["action"] = "describe_object"
+            return details
+
+        if isinstance(query, CreateCharacterQuery):
+            spec = self.asset_alias_registry.upsert(
+                alias_name=query.character_name,
+                kind="character",
+                image_name=query.image_name,
+            )
+            return {
+                "action": "create_character",
+                "character_name": spec.alias_name,
+                "image_name": spec.image_name,
+            }
+
+        if isinstance(query, CreateObjectQuery):
+            spec = self.asset_alias_registry.upsert(
+                alias_name=query.object_name,
+                kind="object",
+                image_name=query.image_name,
+            )
+            return {
+                "action": "create_object",
+                "object_name": spec.alias_name,
+                "image_name": spec.image_name,
+            }
+
+        if isinstance(query, CreateWorkflowSlotQuery):
+            table_spec = self.registry.get(query.workflow_table)
+            if table_spec is None:
+                raise SQLEngineError(f"Workflow table '{query.workflow_table}' does not exist.", exit_code=2)
+            spec = self.workflow_slot_registry.upsert(
+                workflow_table=table_spec.table,
+                slot_name=query.slot_name,
+                slot_kind=query.slot_kind,
+                binding_key=query.binding_key,
+            )
+            return {
+                "action": "create_slot",
+                "workflow_table": spec.workflow_table,
+                "slot_name": spec.slot_name,
+                "slot_kind": spec.slot_kind,
+                "binding_key": spec.binding_key,
+            }
 
         if isinstance(query, CreateQueryMacroQuery):
             spec = self.query_registry.upsert(name=query.name, sql_text=query.sql_text)
@@ -1351,15 +1764,18 @@ class LocalComfySQLEngine:
                 }
 
             workflow_spec = self.registry.get(query.table_name)
+            resolved_layers: dict[str, Any] = {}
             if workflow_spec is not None:
                 if query.where_raw is not None:
                     raise SQLEngineError(
                         "Advanced WHERE expressions are currently supported only for models table.",
                         exit_code=2,
                     )
-                merged_where = self._merge_profile_preset_where(
+                merged_where, resolved_layers = self._merge_profile_preset_character_where(
                     table_name=query.table_name,
                     preset_name=getattr(query, "preset_name", None),
+                    character_name=getattr(query, "character_name", None),
+                    object_name=getattr(query, "object_name", None),
                     profile_name=getattr(query, "profile_name", None),
                     where=query.where,
                 )
@@ -1376,9 +1792,11 @@ class LocalComfySQLEngine:
                         "Advanced WHERE expressions are currently supported only for models table.",
                         exit_code=2,
                     )
-                merged_where = self._merge_profile_preset_where(
+                merged_where, resolved_layers = self._merge_profile_preset_character_where(
                     table_name=query.table_name,
                     preset_name=getattr(query, "preset_name", None),
+                    character_name=getattr(query, "character_name", None),
+                    object_name=getattr(query, "object_name", None),
                     profile_name=getattr(query, "profile_name", None),
                     where=query.where,
                 )
@@ -1432,12 +1850,15 @@ class LocalComfySQLEngine:
             )
 
             if query.explain or compile_only:
-                return {
+                out = {
                     "action": "explain" if query.explain else "compiled",
                     "prompt": prompt,
                     "validation": validation,
                     "api_prompt_path": str(api_path),
                 }
+                if resolved_layers:
+                    out["resolved_layers"] = resolved_layers
+                return out
 
             submit_result = self._submit_api_prompt(prompt, self.host, self.port, timeout, no_cache) or {}
             result: dict[str, Any] = {
@@ -1446,6 +1867,8 @@ class LocalComfySQLEngine:
                 "validation": validation,
                 "api_prompt_path": str(api_path),
             }
+            if resolved_layers:
+                result["resolved_layers"] = resolved_layers
             if isinstance(upload_report, dict):
                 result["upload_preflight"] = upload_report
             prompt_id = submit_result.get("prompt_id")
@@ -1459,11 +1882,30 @@ class LocalComfySQLEngine:
                         exit_code=4,
                     )
                 local_dir = Path(download_dir).expanduser().resolve() if download_dir else (Path.cwd() / "output").resolve()
-                download_report = self._download_outputs_for_prompt(
-                    prompt_id=prompt_id,
-                    output_dir=local_dir,
-                    timeout=timeout,
-                )
+                try:
+                    download_report = self._download_outputs_for_prompt(
+                        prompt_id=prompt_id,
+                        output_dir=local_dir,
+                        timeout=timeout,
+                    )
+                except SQLEngineError as exc:
+                    # Fallback for servers where /history is protected but /view can still be read.
+                    if "failure_category=auth" in str(exc):
+                        prefixes = self._extract_saveimage_prefixes(prompt)
+                        if not prefixes:
+                            raise
+                        print(
+                            "download_fallback mode=view_prefix reason=history_auth "
+                            f"prefixes={','.join(prefixes)}",
+                            flush=True,
+                        )
+                        download_report = self._download_outputs_by_prefixes(
+                            prefixes=prefixes,
+                            output_dir=local_dir,
+                            timeout=timeout,
+                        )
+                    else:
+                        raise
                 result["downloaded_outputs"] = download_report["downloaded"]
                 result["downloaded_count"] = len(download_report["downloaded"])
                 result["download_failures"] = download_report["failed"]
@@ -1550,18 +1992,27 @@ class LocalComfySQLEngine:
             if hit is not None:
                 return hit
 
-        # assets/foo.png should resolve from local input/assets.
+        # assets/foo.png resolves from local input/assets first, then legacy input/.
         if normalized.lower().startswith("assets/"):
             tail = normalized.split("/", 1)[1] if "/" in normalized else candidate.name
             for root in roots:
                 hit = _pick(root / "input" / "assets" / tail)
                 if hit is not None:
                     return hit
+            for root in roots:
+                hit = _pick(root / "input" / tail)
+                if hit is not None:
+                    return hit
 
-        # bare filename like woman.jpg should also resolve from local input/assets.
+        # Bare filename like woman.jpg resolves from input/assets first (canonical),
+        # then falls back to legacy input/ for backward compatibility.
         if "/" not in normalized:
             for root in roots:
                 hit = _pick(root / "input" / "assets" / normalized)
+                if hit is not None:
+                    return hit
+            for root in roots:
+                hit = _pick(root / "input" / normalized)
                 if hit is not None:
                     return hit
 
@@ -1905,6 +2356,88 @@ class LocalComfySQLEngine:
             downloaded.append(str(dest_path))
         return {"downloaded": downloaded, "failed": failed}
 
+    def _extract_saveimage_prefixes(self, prompt: dict[str, Any]) -> list[str]:
+        prefixes: list[str] = []
+        seen: set[str] = set()
+        for node in prompt.values():
+            if not isinstance(node, dict):
+                continue
+            class_type = str(node.get("class_type", "")).strip()
+            if class_type.lower() != "saveimage":
+                continue
+            inputs = node.get("inputs", {})
+            if not isinstance(inputs, dict):
+                continue
+            raw = inputs.get("filename_prefix")
+            if not isinstance(raw, str):
+                continue
+            value = raw.strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            prefixes.append(value)
+        return prefixes
+
+    def _download_outputs_by_prefixes(
+        self,
+        *,
+        prefixes: list[str],
+        output_dir: Path,
+        timeout: float,
+        max_files_per_prefix: int = 8,
+    ) -> dict[str, Any]:
+        if not prefixes:
+            return {"downloaded": [], "failed": []}
+        output_dir.mkdir(parents=True, exist_ok=True)
+        downloaded: list[str] = []
+        failed: list[dict[str, Any]] = []
+        exts = ("png", "jpg", "jpeg", "webp")
+
+        for prefix in prefixes:
+            found_any_for_prefix = False
+            for idx in range(1, max_files_per_prefix + 1):
+                found_this_index = False
+                for ext in exts:
+                    filename = f"{prefix}_{idx:05d}_.{ext}"
+                    query = parse.urlencode({"filename": filename, "subfolder": "", "type": "output"})
+                    try:
+                        raw = self._read_bytes(f"/view?{query}", timeout=timeout)
+                    except Exception as exc:
+                        text = str(exc)
+                        if "HTTP Error 404" in text:
+                            continue
+                        category, next_action = self._classify_failure(exc, default_category="network")
+                        failed.append(
+                            {
+                                "filename": filename,
+                                "subfolder": "",
+                                "error": text,
+                                "failure_category": category,
+                                "next_action": next_action,
+                            }
+                        )
+                        continue
+
+                    dest_path = output_dir / filename
+                    if dest_path.exists():
+                        stem = dest_path.stem
+                        suffix = dest_path.suffix
+                        counter = 1
+                        while True:
+                            alt = output_dir / f"{stem}_{counter}{suffix}"
+                            if not alt.exists():
+                                dest_path = alt
+                                break
+                            counter += 1
+                    dest_path.write_bytes(raw)
+                    downloaded.append(str(dest_path))
+                    found_any_for_prefix = True
+                    found_this_index = True
+                    break
+                if not found_this_index and found_any_for_prefix:
+                    break
+        return {"downloaded": downloaded, "failed": failed}
+
     def _ensure_template_exists(self, template_name: str, get_template: Callable[[str], Any]) -> None:
         if get_template(template_name.lower()) is not None:
             return
@@ -1979,6 +2512,266 @@ class LocalComfySQLEngine:
             return False
         return isinstance(out, int)
 
+    @staticmethod
+    def _is_object_alias(name: str) -> bool:
+        return str(name or "").strip().lower().startswith("obj_")
+
+    def _alias_summary_rows(self, *, object_mode: bool) -> list[dict[str, Any]]:
+        specs = self.character_binding_registry.list()
+        grouped: dict[str, dict[str, Any]] = {}
+        for spec in specs:
+            alias = str(spec.character_name)
+            if not alias:
+                continue
+            is_obj = self._is_object_alias(alias)
+            if object_mode != is_obj:
+                continue
+            key = alias.lower()
+            row = grouped.get(key)
+            if row is None:
+                row = {
+                    "name": alias,
+                    "kind": "object" if is_obj else "character",
+                    "workflow_count": 0,
+                    "binding_count": 0,
+                    "workflows": set(),
+                }
+                grouped[key] = row
+            row["binding_count"] = int(row["binding_count"]) + 1
+            workflows = row.get("workflows")
+            if isinstance(workflows, set):
+                workflows.add(str(spec.workflow_table))
+                row["workflow_count"] = len(workflows)
+        out: list[dict[str, Any]] = []
+        for row in grouped.values():
+            workflows = sorted(str(x) for x in (row.get("workflows") or set()))
+            out.append(
+                {
+                    "name": row.get("name"),
+                    "kind": row.get("kind"),
+                    "workflow_count": row.get("workflow_count", 0),
+                    "binding_count": row.get("binding_count", 0),
+                    "workflows": workflows,
+                }
+            )
+        registry_kind = "object" if object_mode else "character"
+        for alias in self.asset_alias_registry.list(kind=registry_kind):
+            key = alias.alias_name.lower()
+            if key in grouped:
+                continue
+            out.append(
+                {
+                    "name": alias.alias_name,
+                    "kind": alias.kind,
+                    "workflow_count": 0,
+                    "binding_count": 0,
+                    "workflows": [],
+                    "image_name": alias.image_name,
+                }
+            )
+        return sorted(out, key=lambda r: str(r.get("name", "")).lower())
+
+    def _describe_alias(self, *, alias_name: str, object_mode: bool) -> dict[str, Any]:
+        if not alias_name:
+            raise SQLEngineError("Alias name is required.", exit_code=2)
+        specs = [spec for spec in self.character_binding_registry.list() if str(spec.character_name).lower() == alias_name.lower()]
+        alias_spec = self.asset_alias_registry.get(alias_name)
+        if not specs and alias_spec is None:
+            raise SQLEngineError(f"{'Object' if object_mode else 'Character'} '{alias_name}' does not exist.", exit_code=2)
+
+        expected_object_mode = (alias_spec.kind == "object") if alias_spec is not None else self._is_object_alias(alias_name)
+        if object_mode != expected_object_mode:
+            if object_mode:
+                raise SQLEngineError(
+                    f"Alias '{alias_name}' is registered as a character. "
+                    f"Use `DESCRIBE CHARACTER {alias_name}`.",
+                    exit_code=2,
+                )
+            raise SQLEngineError(
+                f"Alias '{alias_name}' is registered as an object. "
+                f"Use `DESCRIBE OBJECT {alias_name}`.",
+                exit_code=2,
+            )
+
+        bindings = [
+            {
+                "workflow_table": spec.workflow_table,
+                "binding_key": spec.binding_key,
+                "binding_value": spec.binding_value,
+                "created_at": spec.created_at,
+                "updated_at": spec.updated_at,
+            }
+            for spec in sorted(specs, key=lambda s: (s.workflow_table.lower(), s.binding_key.lower()))
+        ]
+        slot_bindings = [
+            {
+                "workflow_table": spec.workflow_table,
+                "slot_name": spec.slot_name,
+                "slot_kind": spec.slot_kind,
+                "binding_key": spec.binding_key,
+            }
+            for spec in self.workflow_slot_registry.list()
+            if spec.slot_kind == ("object" if object_mode else "character")
+        ]
+        return {
+            "kind": "object" if object_mode else "character",
+            "name": alias_name,
+            "image_name": alias_spec.image_name if alias_spec is not None else None,
+            "binding_count": len(bindings),
+            "bindings": bindings,
+            "slot_bindings": slot_bindings,
+        }
+
+    def upsert_character_binding(
+        self,
+        *,
+        workflow_table: str,
+        character_name: str,
+        binding_key: str,
+        binding_value: Any,
+    ) -> CharacterBindingSpec:
+        table_spec = self.registry.get(workflow_table)
+        if table_spec is None:
+            raise SQLEngineError(f"Unknown workflow table '{workflow_table}' for character binding.", exit_code=2)
+        return self.character_binding_registry.upsert(
+            workflow_table=table_spec.table,
+            character_name=character_name,
+            binding_key=binding_key,
+            binding_value=binding_value,
+        )
+
+    def _resolve_character_params(self, *, table_name: str, character_name: str) -> dict[str, Any]:
+        bindings = self.character_binding_registry.list_for(workflow_table=table_name, character_name=character_name)
+        if bindings:
+            out: dict[str, Any] = {}
+            for spec in bindings:
+                out[str(spec.binding_key).lower()] = spec.binding_value
+            return out
+        alias = self.asset_alias_registry.get(character_name)
+        if alias is not None and alias.kind == "character":
+            slots = self.workflow_slot_registry.list_for_workflow_kind(
+                workflow_table=table_name,
+                slot_kind="character",
+            )
+            if not slots:
+                raise SQLEngineError(
+                    f"Character '{character_name}' exists, but workflow '{table_name}' has no CHARACTER slot. "
+                    "Create one with `CREATE SLOT <name> FOR <workflow> AS CHARACTER BINDING <node.input>;`.",
+                    exit_code=2,
+                )
+            if len(slots) > 1:
+                raise SQLEngineError(
+                    f"Workflow '{table_name}' has multiple CHARACTER slots ({', '.join(s.slot_name for s in slots)}). "
+                    "Use legacy workflow-bound character aliases for this workflow or keep a single CHARACTER slot.",
+                    exit_code=2,
+                )
+            return {str(slots[0].binding_key).lower(): alias.image_name}
+        has_character_anywhere = self.character_binding_registry.has_character(character_name=character_name)
+        if has_character_anywhere:
+            raise SQLEngineError(
+                f"Character '{character_name}' exists but is not bound to workflow '{table_name}'. "
+                "Bind it for this workflow or choose a character that is bound.",
+                exit_code=2,
+            )
+        raise SQLEngineError(
+            f"Character '{character_name}' does not exist. "
+            f"Bind it first with `comfy-agent bind-character --workflow {table_name} --character {character_name} --image <file>`.",
+            exit_code=2,
+        )
+
+    def _resolve_object_params(self, *, table_name: str, object_name: str) -> dict[str, Any]:
+        alias = self.asset_alias_registry.get(object_name)
+        if alias is None or alias.kind != "object":
+            raise SQLEngineError(
+                f"Object '{object_name}' does not exist. "
+                "Create it first with `CREATE OBJECT <name> WITH image='<filename>';`.",
+                exit_code=2,
+            )
+        slots = self.workflow_slot_registry.list_for_workflow_kind(
+            workflow_table=table_name,
+            slot_kind="object",
+        )
+        if not slots:
+            raise SQLEngineError(
+                f"Object '{object_name}' exists, but workflow '{table_name}' has no OBJECT slot. "
+                "Create one with `CREATE SLOT <name> FOR <workflow> AS OBJECT BINDING <node.input>;`.",
+                exit_code=2,
+            )
+        if len(slots) > 1:
+            raise SQLEngineError(
+                f"Workflow '{table_name}' has multiple OBJECT slots ({', '.join(s.slot_name for s in slots)}). "
+                "Keep a single OBJECT slot for automatic resolution.",
+                exit_code=2,
+            )
+        return {str(slots[0].binding_key).lower(): alias.image_name}
+
+    def _merge_profile_preset_character_where(
+        self,
+        *,
+        table_name: str,
+        preset_name: str | None,
+        character_name: str | None,
+        object_name: str | None = None,
+        profile_name: str | None,
+        where: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        merged: dict[str, Any] = {}
+        resolved_preset = preset_name
+        resolved_character = character_name
+        resolved_object = object_name
+        resolution_hint = ""
+
+        preset_spec = self.preset_registry.get(table_name, preset_name) if preset_name else None
+        character_params: dict[str, Any] = {}
+
+        if character_name:
+            character_params = self._resolve_character_params(table_name=table_name, character_name=character_name)
+        elif preset_name and preset_spec is None:
+            # Backward-compatible shorthand: USING char_name.
+            character_params = self._resolve_character_params(table_name=table_name, character_name=preset_name)
+            resolved_character = preset_name
+            resolved_preset = None
+        elif preset_name:
+            # Preset-first conflict behavior; explicit CHARACTER disambiguates.
+            if self.character_binding_registry.list_for(workflow_table=table_name, character_name=preset_name):
+                resolution_hint = (
+                    f"USING '{preset_name}' resolved as preset for workflow '{table_name}'. "
+                    f"Use `CHARACTER {preset_name}` to force character resolution."
+                )
+
+        if resolved_preset:
+            preset = self.preset_registry.get(table_name, resolved_preset)
+            if preset is None:
+                raise SQLEngineError(
+                    f"Preset '{resolved_preset}' for template '{table_name}' does not exist.",
+                    exit_code=2,
+                )
+            merged = dict(preset.params)
+
+        if character_params:
+            merged.update(character_params)
+
+        if object_name:
+            merged.update(self._resolve_object_params(table_name=table_name, object_name=object_name))
+
+        if profile_name:
+            profile = self.profile_registry.get(profile_name)
+            if profile is None:
+                raise SQLEngineError(f"Profile '{profile_name}' does not exist.", exit_code=2)
+            merged.update(profile.params)
+        merged.update(where)
+        merged = self._apply_cinematic_preset_fields(merged)
+
+        resolved: dict[str, Any] = {
+            "preset": resolved_preset or "",
+            "character": resolved_character or "",
+            "object": resolved_object or "",
+            "profile": profile_name or "",
+        }
+        if resolution_hint:
+            resolved["hint"] = resolution_hint
+        return merged, resolved
+
     def _merge_profile_preset_where(
         self,
         *,
@@ -1987,30 +2780,26 @@ class LocalComfySQLEngine:
         profile_name: str | None,
         where: dict[str, Any],
     ) -> dict[str, Any]:
-        merged: dict[str, Any] = {}
-        if preset_name:
-            preset = self.preset_registry.get(table_name, preset_name)
-            if preset is None:
-                raise SQLEngineError(
-                    f"Preset '{preset_name}' for template '{table_name}' does not exist.",
-                    exit_code=2,
-                )
-            merged = dict(preset.params)
-        if profile_name:
-            profile = self.profile_registry.get(profile_name)
-            if profile is None:
-                raise SQLEngineError(f"Profile '{profile_name}' does not exist.", exit_code=2)
-            merged.update(profile.params)
-        merged.update(where)
-        return self._apply_cinematic_preset_fields(merged)
-
-    def _merge_preset_where(self, *, table_name: str, preset_name: str | None, where: dict[str, Any]) -> dict[str, Any]:
-        return self._merge_profile_preset_where(
+        merged, _resolved = self._merge_profile_preset_character_where(
             table_name=table_name,
             preset_name=preset_name,
+            character_name=None,
+            object_name=None,
+            profile_name=profile_name,
+            where=where,
+        )
+        return merged
+
+    def _merge_preset_where(self, *, table_name: str, preset_name: str | None, where: dict[str, Any]) -> dict[str, Any]:
+        merged, _resolved = self._merge_profile_preset_character_where(
+            table_name=table_name,
+            preset_name=preset_name,
+            character_name=None,
+            object_name=None,
             profile_name=None,
             where=where,
         )
+        return merged
 
     def _filter_models_rows(
         self,

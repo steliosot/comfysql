@@ -1,8 +1,8 @@
 ---
 name: copy_assets
-description: Copy local input assets to a configured Comfy remote/server via comfy-agent copy-assets with dry-run and apply modes.
+description: Copy local input assets to a configured Comfy remote/server via comfysql copy-assets with dry-run and apply modes.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"📦","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"📦","requires":{"bins":["comfysql"]}}}
 ---
 
 # copy_assets
@@ -11,7 +11,7 @@ Use this skill to sync local files from `input/assets` (or a specific file/folde
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Server alias exists in config (for example `remote`).
 - Local assets exist under `${REPO_ROOT}/input/assets`.
 

@@ -1,159 +1,332 @@
-# Comfy Agent Commands
+# ComfySQL CLI Commands
 
-This file is the command reference for `comfy-agent` and ComfySQL.
+Single-file reference for `comfysql` (primary) and `comfy-agent` (compatibility alias).
 
-## CLI Commands
+Output behavior:
 
-## Global
+- Interactive terminal: clean colorized status/success/warning/error lines.
+- Non-interactive runs: plain text output (no forced ANSI escape codes).
+- Known failures include a concise `hint:` line with a concrete next command.
 
-- `comfy-agent -h`
-- `comfy-agent <command> -h`
+## Top-Level Commands
 
-## Connection / Health
+```bash
+comfysql -h
+```
 
-- `comfy-agent status [server] [--config <path>] [--host <host>] [--port <port>]`
-- `comfy-agent doctor [server] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]`
+Compatibility:
+
+```bash
+comfy-agent -h
+```
+
+Available commands:
+
+- `status`
+- `doctor`
+- `stop`
+- `restart`
+- `pull`
+- `copy-assets`
+- `bind-character`
+- `sync`
+- `download`
+- `submit`
+- `validate`
+- `sql`
+- `sql-report`
+- `config`
+
+## CLI Command Reference
+
+## Health / Connectivity
+
+```bash
+comfysql status [server] [--config <path>] [--host <host>] [--port <port>]
+comfysql doctor [server] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+comfysql sync [server] [--config <path>] [--host <host>] [--port <port>] [--start-timeout <seconds>] [--timeout <seconds>]
+```
+
+## Asset Operations
+
+```bash
+comfysql copy-assets [server] [source] [--all] [--dry-run] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+```
 
 Notes:
-- `doctor` checks health, `/object_info`, `/models`, websocket, and auth-header presence.
 
-## Server Control (Remote-only mode)
+- Use `copy-assets` (hyphen), not `copy_assets`.
+- `source` is positional, not `--source`.
+- Canonical local asset folder is `input/assets`.
+- `--all` copies all files from local `./input/assets`.
 
-- `comfy-agent stop ...`
-- `comfy-agent restart ...`
+Examples:
 
-Notes:
-- These commands are currently exposed but intentionally unsupported in remote-only mode.
+```bash
+comfysql copy-assets remote --all
+comfysql copy-assets remote input/assets/bets.png
+```
 
-## Model / Asset Operations
+## Workflow Binding Compatibility Command
 
-- `comfy-agent pull [--config <hf_pull_config.json>] [--yes] [--dry-run]`
-- `comfy-agent copy-assets [server] [<source>] [--all] [--dry-run] [--timeout <seconds>] [--config <path>] [--host <host>] [--port <port>]`
-- `comfy-agent sync [server] [--config <path>] [--host <host>] [--port <port>] [--start-timeout <seconds>] [--timeout <seconds>]`
+```bash
+comfysql bind-character [server] --workflow <workflow_table> --character <alias> --image <file> [--binding <node.input>] [--upload] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+```
 
-## Workflow Execution
+Note:
 
-- `comfy-agent validate <workflow.json> [server] [--config <path>] [--host <host>] [--port <port>]`
-- `comfy-agent submit <workflow.json> [server] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>] [--no-cache] [--skip-validate]`
+- This is still supported for legacy per-workflow binding.
+- Preferred model is relational SQL (`CREATE CHARACTER/OBJECT/SLOT`) documented below.
+
+## Models / Pull
+
+```bash
+comfysql pull [--config <hf_pull_config.json>] [--yes] [--dry-run]
+```
+
+## Validate / Submit
+
+```bash
+comfysql validate [--config <path>] [--host <host>] [--port <port>] <workflow>
+comfysql submit [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>] [--no-cache] [--skip-validate] <workflow>
+```
+
+## Download by URL
+
+```bash
+comfysql download [server] --url <absolute-url-or-/view?...> [--output <local-file>] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+```
 
 ## SQL Runner
 
-- `comfy-agent sql [server] [--config <path>]`
-- `comfy-agent sql [server] --sql "<statement>;"`
-- `comfy-agent sql [server] --sql-file <file.sql>`
+```bash
+comfysql sql [server] [--config <path>]
+comfysql sql [server] --sql "<statement>;"
+comfysql sql [server] --sql-file <file.sql>
+```
 
 SQL runner flags:
+
 - `--show-tables {all,workflows,templates,nodes,presets,profiles,models}`
 - `--compile-only`
 - `--dry-run` (alias of `--compile-only`)
 - `--no-cache`
-- `-y, --yes` (skip destructive SQL confirmation)
+- `-y, --yes`
 - `--upload-mode {strict,warn,off}`
 - `--download-output`
 - `--output-mode {none,download}`
 - `--download-dir <path>`
 - `--timeout <seconds>`
 
+## SQL Report Command
+
+```bash
+comfysql sql-report [server] --sql "<single-statement>;" [--report <path.md>] [--title <title>] [--image <path>] [--download-output] [--download-dir <path>] [--upload-mode {strict,warn,off}] [--compile-only] [--no-cache] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+comfysql sql-report [server] --sql-file <file.sql> [same-flags...]
+```
+
 ## Config
 
-- `comfy-agent config init [--path <path>] [--force]`
+```bash
+comfysql config init
+```
 
 ---
 
-## ComfySQL Specification
+## ComfySQL Terminal Behavior
 
-Each statement ends with `;`.
+Start terminal:
 
-In interactive mode:
-- Start with `comfy-agent sql <server>`
-- Exit with `.exit` or `.quit`
-- Clear screen with `clear`, `clear;`, or `.clear`
+```bash
+comfysql sql remote
+```
 
-## Schema / Discovery
+Terminal commands:
 
-- `SHOW TABLES;`
-- `SHOW TABLES workflows;`
-- `SHOW TABLES templates;`
-- `SHOW TABLES nodes;`
-- `SHOW TABLES presets;`
-- `SHOW TABLES profiles;`
-- `SHOW TABLES models;`
+- Exit: `.exit` or `.quit`
+- Clear: `clear`, `clear;`, or `.clear`
 
-Also supported:
-- `DESCRIBE TABLES;`
-- `SHOW WORKFLOWS;`
-- `SHOW TEMPLATES;`
-- `SHOW NODES;`
-- `SHOW PRESETS;`
-- `SHOW PROFILES;`
-- `SHOW MODELS;`
+Statement terminators:
 
-- `REFRESH SCHEMA;`
-- `PING COMFY;`
+- One-line SQL can execute without `;` if complete.
+- Multi-line SQL should end with `;` to execute.
+
+---
+
+## ComfySQL Statement Reference
+
+## Discovery
+
+```sql
+SHOW TABLES;
+SHOW TABLES workflows;
+SHOW TABLES templates;
+SHOW TABLES nodes;
+SHOW TABLES presets;
+SHOW TABLES profiles;
+SHOW TABLES models;
+
+SHOW WORKFLOWS;
+SHOW TEMPLATES;
+SHOW NODES;
+SHOW PRESETS;
+SHOW PROFILES;
+SHOW MODELS;
+
+SHOW CHARACTERS;
+SHOW OBJECTS;
+
+REFRESH SCHEMA;
+PING COMFY;
+```
 
 ## Describe
 
-- `DESCRIBE <target>;`  
-  where target can be a workflow table, template, node class, or `models`
-- `DESCRIBE WORKFLOW <table>;`
-- `SHOW WORKFLOW <table>;` (alias)
-- `DESCRIBE PRESET <preset> FOR <table>;`
-- `SHOW PRESET <preset> FOR <table>;` (alias)
-- `DESCRIBE PROFILE <profile>;`
+```sql
+DESCRIBE <target>;
+DESCRIBE WORKFLOW <table>;
+SHOW WORKFLOW <table>;
 
-## Workflow Tables
+DESCRIBE PRESET <preset> FOR <table>;
+SHOW PRESET <preset> FOR <table>;
+DESCRIBE PROFILE <profile>;
 
-- `CREATE TABLE <table> AS WORKFLOW '<absolute-or-relative-path-to-json>';`
-- `CREATE TABLE <table> AS TEMPLATE '<absolute-or-relative-path-to-json>';`
-- `CREATE TEMPLATE <table> AS WORKFLOW '<absolute-or-relative-path-to-json>';`
-- `DROP TABLE <table>;`
-- `DROP WORKFLOW <table>;` (alias)
-- `SET META FOR <table> AS '<json-object>';`
-- `UNSET META FOR <table>;`
+DESCRIBE CHARACTER <char_alias>;
+DESCRIBE OBJECT <obj_alias>;
+```
 
-Notes:
-- Template creation captures workflow default input values (stored with the template entry).
-- If the source workflow JSON contains top-level `"meta": {...}`, it is imported automatically.
-- You can materialize those defaults into a preset with:
-  - `CREATE PRESET <preset> FOR <template_or_table> AS DEFAULTS;`
+## Workflow Registration
+
+```sql
+CREATE TABLE <table> AS WORKFLOW '<path-to-workflow.json>';
+CREATE TEMPLATE <table> AS WORKFLOW '<path-to-workflow.json>';
+CREATE TABLE <table> AS TEMPLATE '<path-to-workflow.json>';
+
+DROP TABLE <table>;
+DROP WORKFLOW <table>;
+
+SET META FOR <table> AS '{"intent":"image_generation"}';
+UNSET META FOR <table>;
+```
+
+Template note:
+
+- Template syntax is supported for compatibility.
+- Recommended primary flow is workflow table + presets/profiles + relational assets.
 
 ## Presets
 
-- `CREATE PRESET <preset> FOR <table> WITH key=value AND key2='value';`
-- `CREATE PRESET <preset> FOR <table> AS DEFAULTS;`
-- `ALTER PRESET <preset> FOR <table> SET key=value AND key2='value';`
-- `DROP PRESET <preset> FOR <table>;`
+```sql
+CREATE PRESET <preset> FOR <table> WITH key=value AND key2='value';
+CREATE PRESET <preset> FOR <table> AS DEFAULTS;
+ALTER PRESET <preset> FOR <table> SET key=value AND key2='value';
+DROP PRESET <preset> FOR <table>;
+```
 
 ## Profiles
 
-- `CREATE PROFILE <profile> WITH key=value AND key2='value';`
-- `ALTER PROFILE <profile> SET key=value AND key2='value';`
-- `DROP PROFILE <profile>;`
+```sql
+CREATE PROFILE <profile> WITH key=value AND key2='value';
+ALTER PROFILE <profile> SET key=value AND key2='value';
+DROP PROFILE <profile>;
+```
 
 ## Query Macros
 
-- `SHOW QUERIES;`
-- `CREATE QUERY <name> AS <sql>;`
-- `DESCRIBE QUERY <name>;`
-- `RUN QUERY <name>;`
-- `DROP QUERY <name>;`
+```sql
+SHOW QUERIES;
+CREATE QUERY <name> AS <sql>;
+DESCRIBE QUERY <name>;
+RUN QUERY <name>;
+DROP QUERY <name>;
+```
+
+## Relational Assets (Preferred)
+
+1. Copy assets to remote:
+
+```bash
+comfysql copy-assets remote --all
+```
+
+2. Register reusable aliases:
+
+```sql
+CREATE CHARACTER char_bets WITH image='bets.png';
+CREATE CHARACTER char_matt WITH image='matt.png';
+CREATE OBJECT obj_hat WITH image='sunday-afternoons-havana-hat-hat.jpg';
+```
+
+3. Map workflow slots once:
+
+```sql
+CREATE SLOT subject FOR img2img_reference AS CHARACTER BINDING input_image;
+CREATE SLOT subject FOR img2img_2_inputs AS CHARACTER BINDING 198.image;
+CREATE SLOT hat FOR img2img_2_inputs AS OBJECT BINDING 213.image;
+```
+
+4. Reuse directly in queries:
+
+```sql
+SELECT image
+FROM img2img_reference
+USING default_run
+CHARACTER char_matt
+PROFILE goldenhour_backlight
+WHERE prompt='cinematic portrait of Matt in central London at sunset'
+  AND seed=123
+  AND filename_prefix='img2img_matt_london_123';
+```
+
+```sql
+SELECT image
+FROM img2img_2_inputs
+USING default_run
+CHARACTER char_matt
+OBJECT obj_hat
+PROFILE goldenhour_backlight
+WHERE prompt='cinematic portrait of Matt wearing a summer hat in central London at golden hour'
+  AND seed=123
+  AND filename_prefix='img2img2_matt_hat_123';
+```
 
 ## SELECT / EXPLAIN
 
-- `SELECT <output> FROM <table> [AS <alias>] [USING <preset>] [PROFILE <profile>] [WHERE ...];`
-- `EXPLAIN SELECT <output> FROM <table> ...;`
+General form:
 
-Models table supports additional clauses:
+```sql
+SELECT <output>
+FROM <table>
+[AS <alias>]
+[USING <preset>]
+[CHARACTER <char_alias>]
+[OBJECT <obj_alias>]
+[PROFILE <profile>]
+[WHERE ...];
+
+EXPLAIN SELECT ...;
+```
+
+Models table supports:
+
 - `ORDER BY <category|name|path|folder> [ASC|DESC]`
 - `LIMIT <n>`
 
 Example:
-- `SELECT name FROM models WHERE category='checkpoints' ORDER BY name DESC LIMIT 5;`
 
-## Auto Upload / Output Download Behavior
+```sql
+SELECT name FROM models WHERE category='checkpoints' ORDER BY name DESC LIMIT 5;
+```
 
-For SQL `SELECT`:
-- Local file paths bound to supported asset fields are auto-uploaded before submit.
-- Upload policy is controlled by `--upload-mode`.
-- Output file download is enabled with `--download-output` or `--output-mode download`.
-- Download results report both successes and failures (partial downloads are preserved). 
+Compatibility note:
+
+- Legacy shorthand `USING char_*` still works where supported.
+- Explicit `CHARACTER <name>` is preferred.
+
+---
+
+## Download Behavior Notes
+
+- `--download-output` or `--output-mode download` downloads generated outputs after `SELECT`.
+- On servers where `/history` is auth-restricted, fallback may use filename prefixes.
+- For predictable per-run downloads, set a unique `filename_prefix` in `WHERE`.

@@ -1,7 +1,7 @@
 -- txt2img_empty_latent sample commands
 -- Run:
 -- REPO_ROOT="$(cd "$(dirname "$0")"/../.. && pwd)"
--- comfy-agent sql remote --sql-file "${REPO_ROOT}/openclaw/txt2img_empty_latent/txt2img_empty_latent.sql"
+-- comfysql sql remote --sql-file "${REPO_ROOT}/openclaw/txt2img_empty_latent/txt2img_empty_latent.sql"
 
 -- prechecks (fail fast)
 DESCRIBE WORKFLOW txt2img_empty_latent;

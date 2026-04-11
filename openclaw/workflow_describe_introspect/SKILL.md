@@ -2,7 +2,7 @@
 name: workflow_describe_introspect
 description: Inspect workflow bindable fields and metadata using DESCRIBE WORKFLOW for safer query authoring.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🔎","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🔎","requires":{"bins":["comfysql"]}}}
 ---
 
 # workflow_describe_introspect
@@ -11,7 +11,7 @@ Use this skill to inspect table schema/bindable fields before writing WHERE bind
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Workflow table exists.
 
 ## Execution

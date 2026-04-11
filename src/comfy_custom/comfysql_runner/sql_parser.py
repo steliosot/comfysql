@@ -15,6 +15,7 @@ def _parse_error_with_examples(statement: str) -> SQLParseError:
     examples = [
         "SELECT image FROM txt2img_empty WHERE seed=1;",
         "EXPLAIN SELECT image FROM txt2img_empty WHERE seed=1;",
+        "SELECT image FROM img2img_controlnet USING default_run CHARACTER char_bets PROFILE goldenhour_backlight WHERE seed=1;",
         "SHOW TABLES;",
         "DESCRIBE WORKFLOW txt2img_empty;",
         "CREATE TABLE demo AS WORKFLOW '/abs/path/workflow.json';",
@@ -54,6 +55,8 @@ class SelectQuery:
     where_raw: str | None = None
     source_alias: str | None = None
     preset_name: str | None = None
+    character_name: str | None = None
+    object_name: str | None = None
     profile_name: str | None = None
     order_by: tuple[str, str] | None = None
     limit: int | None = None
@@ -158,6 +161,46 @@ class DescribeProfileQuery:
 
 
 @dataclass
+class ShowCharactersQuery:
+    pass
+
+
+@dataclass
+class ShowObjectsQuery:
+    pass
+
+
+@dataclass
+class DescribeCharacterQuery:
+    character_name: str
+
+
+@dataclass
+class DescribeObjectQuery:
+    object_name: str
+
+
+@dataclass
+class CreateCharacterQuery:
+    character_name: str
+    image_name: str
+
+
+@dataclass
+class CreateObjectQuery:
+    object_name: str
+    image_name: str
+
+
+@dataclass
+class CreateWorkflowSlotQuery:
+    slot_name: str
+    workflow_table: str
+    slot_kind: str
+    binding_key: str
+
+
+@dataclass
 class CreateQueryMacroQuery:
     name: str
     sql_text: str
@@ -202,6 +245,13 @@ SQLQuery = (
     | CreateProfileQuery
     | DropProfileQuery
     | DescribeProfileQuery
+    | ShowCharactersQuery
+    | ShowObjectsQuery
+    | DescribeCharacterQuery
+    | DescribeObjectQuery
+    | CreateCharacterQuery
+    | CreateObjectQuery
+    | CreateWorkflowSlotQuery
     | CreateQueryMacroQuery
     | RunQueryMacroQuery
     | DropQueryMacroQuery
@@ -380,6 +430,10 @@ def parse_sql(sql: str) -> SQLQuery:
         return DescribeTablesQuery(filter_kind="presets")
     if upper in ("SHOW PROFILES", "DESCRIBE PROFILES"):
         return DescribeTablesQuery(filter_kind="profiles")
+    if upper == "SHOW CHARACTERS":
+        return ShowCharactersQuery()
+    if upper == "SHOW OBJECTS":
+        return ShowObjectsQuery()
 
     show_tables_match = re.match(
         r"^(?:SHOW|DESCRIBE)\s+TABLES\s+(all|nodes|templates|workflows|presets|profiles|models)$",
@@ -444,6 +498,57 @@ def parse_sql(sql: str) -> SQLQuery:
     )
     if describe_profile_match:
         return DescribeProfileQuery(profile_name=describe_profile_match.group(1))
+
+    describe_character_match = re.match(
+        r"^DESCRIBE\s+CHARACTER\s+([a-zA-Z_][a-zA-Z0-9_]*)$",
+        statement,
+        flags=re.IGNORECASE,
+    )
+    if describe_character_match:
+        return DescribeCharacterQuery(character_name=describe_character_match.group(1))
+
+    describe_object_match = re.match(
+        r"^DESCRIBE\s+OBJECT\s+([a-zA-Z_][a-zA-Z0-9_]*)$",
+        statement,
+        flags=re.IGNORECASE,
+    )
+    if describe_object_match:
+        return DescribeObjectQuery(object_name=describe_object_match.group(1))
+
+    create_character_match = re.match(
+        r"^CREATE\s+CHARACTER\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+WITH\s+image\s*=\s*(.+)$",
+        statement,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if create_character_match:
+        return CreateCharacterQuery(
+            character_name=create_character_match.group(1),
+            image_name=str(_parse_value(create_character_match.group(2))),
+        )
+
+    create_object_match = re.match(
+        r"^CREATE\s+OBJECT\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+WITH\s+image\s*=\s*(.+)$",
+        statement,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if create_object_match:
+        return CreateObjectQuery(
+            object_name=create_object_match.group(1),
+            image_name=str(_parse_value(create_object_match.group(2))),
+        )
+
+    create_slot_match = re.match(
+        r"^CREATE\s+SLOT\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+FOR\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s+(CHARACTER|OBJECT)\s+BINDING\s+([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)$",
+        statement,
+        flags=re.IGNORECASE,
+    )
+    if create_slot_match:
+        return CreateWorkflowSlotQuery(
+            slot_name=create_slot_match.group(1),
+            workflow_table=create_slot_match.group(2),
+            slot_kind=create_slot_match.group(3).lower(),
+            binding_key=create_slot_match.group(4).lower(),
+        )
 
     create_preset_match = re.match(
         r"^CREATE\s+PRESET\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+FOR\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+WITH\s+(.+)$",
@@ -587,12 +692,12 @@ def parse_sql(sql: str) -> SQLQuery:
 
     explain = False
     select_text = statement
-    if upper.startswith("EXPLAIN "):
+    if re.match(r"^EXPLAIN\b", statement, flags=re.IGNORECASE):
         explain = True
-        select_text = statement[len("EXPLAIN ") :].strip()
+        select_text = re.sub(r"^EXPLAIN\b\s*", "", statement, count=1, flags=re.IGNORECASE).strip()
 
     select_match = re.match(
-        r"^SELECT\s+(?P<select>[a-zA-Z_][a-zA-Z0-9_]*)\s+FROM\s+(?P<from>[a-zA-Z_][a-zA-Z0-9_]*)(?:\s+(?:AS\s+)?(?P<alias>[a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+USING\s+(?P<preset>[a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+PROFILE\s+(?P<profile>[a-zA-Z_][a-zA-Z0-9_]*))?\s*(?:WHERE\s+(?P<where>.+))?$",
+        r"^SELECT\s+(?P<select>[a-zA-Z_][a-zA-Z0-9_]*)\s+FROM\s+(?P<from>[a-zA-Z_][a-zA-Z0-9_]*)(?:\s+(?:AS\s+)?(?P<alias>[a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+USING\s+(?P<preset>[a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+CHARACTER\s+(?P<character>[a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+OBJECT\s+(?P<object>[a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+PROFILE\s+(?P<profile>[a-zA-Z_][a-zA-Z0-9_]*))?\s*(?:WHERE\s+(?P<where>.+))?$",
         select_text,
         flags=re.IGNORECASE | re.DOTALL,
     )
@@ -603,6 +708,8 @@ def parse_sql(sql: str) -> SQLQuery:
     table_name = select_match.group("from")
     source_alias = select_match.group("alias")
     preset_name = select_match.group("preset")
+    character_name = select_match.group("character")
+    object_name = select_match.group("object")
     profile_name = select_match.group("profile")
     where_text = select_match.group("where")
 
@@ -646,6 +753,8 @@ def parse_sql(sql: str) -> SQLQuery:
         where_raw=where_raw,
         source_alias=source_alias.lower() if source_alias else None,
         preset_name=preset_name.lower() if preset_name else None,
+        character_name=character_name.lower() if character_name else None,
+        object_name=object_name.lower() if object_name else None,
         profile_name=profile_name.lower() if profile_name else None,
         order_by=order_by,
         limit=limit,

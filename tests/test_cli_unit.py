@@ -111,6 +111,187 @@ def test_cmd_stop_not_running(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     assert "server_not_running" in out
 
 
+def test_resolve_download_url_supports_relative_view_path() -> None:
+    assert (
+        cli._resolve_download_url("view?filename=x.png&type=output", host="127.0.0.1", port=8188)
+        == "http://127.0.0.1:8188/view?filename=x.png&type=output"
+    )
+    assert (
+        cli._resolve_download_url("/view?filename=x.png&type=output", host="127.0.0.1", port=8188)
+        == "http://127.0.0.1:8188/view?filename=x.png&type=output"
+    )
+
+
+def test_cmd_download_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return b"abc123"
+
+    seen: dict[str, str] = {}
+
+    def _fake_open(url: str, **kwargs):
+        seen["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr(cli, "urlopen_with_auth_fallback", _fake_open)
+    out_path = tmp_path / "x.bin"
+    args = argparse.Namespace(
+        url="view?filename=x.png&type=output",
+        output=str(out_path),
+        host="127.0.0.1",
+        port=8188,
+        timeout=5.0,
+    )
+    rc = cli.cmd_download(args)
+    assert rc == 0
+    assert out_path.read_bytes() == b"abc123"
+    assert seen["url"].startswith("http://127.0.0.1:8188/view?")
+    out = capsys.readouterr().out
+    assert "downloaded path=" in out
+
+
+def test_cmd_bind_character_upserts_binding(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    class _Engine:
+        def _auto_upload_local_assets(self, prompt, timeout: float):
+            return prompt, {"uploaded_count": 0, "skipped_existing_count": 0, "failed_count": 0}
+
+        def upsert_character_binding(self, **kwargs):
+            return type(
+                "Spec",
+                (),
+                {
+                    "workflow_table": kwargs["workflow_table"],
+                    "character_name": kwargs["character_name"],
+                    "binding_key": kwargs["binding_key"],
+                    "binding_value": kwargs["binding_value"],
+                },
+            )()
+
+    monkeypatch.setattr(cli, "_build_sql_engine", lambda args: _Engine())
+    args = argparse.Namespace(
+        workflow="img2img_controlnet",
+        character="char_nick",
+        image="nick.jpg.avif",
+        binding="input_image",
+        upload=False,
+        timeout=10.0,
+    )
+    rc = cli.cmd_bind_character(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "character_bound action=upserted" in out
+
+
+def test_cmd_bind_character_upserts_with_upload(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    class _Engine:
+        def _auto_upload_local_assets(self, prompt, timeout: float):
+            return {"1": {"class_type": "LoadImage", "inputs": {"image": "nick.jpg.avif"}}}, {
+                "uploaded_count": 1,
+                "skipped_existing_count": 0,
+                "failed_count": 0,
+            }
+
+        def upsert_character_binding(self, **kwargs):
+            return type(
+                "Spec",
+                (),
+                {
+                    "workflow_table": kwargs["workflow_table"],
+                    "character_name": kwargs["character_name"],
+                    "binding_key": kwargs["binding_key"],
+                    "binding_value": kwargs["binding_value"],
+                },
+            )()
+
+    monkeypatch.setattr(cli, "_build_sql_engine", lambda args: _Engine())
+    args = argparse.Namespace(
+        workflow="img2img_controlnet",
+        character="char_nick",
+        image="nick.jpg.avif",
+        binding="input_image",
+        upload=True,
+        timeout=10.0,
+    )
+    rc = cli.cmd_bind_character(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "character_bound action=upserted" in out
+    assert "upload_preflight uploaded=1" in out
+
+
+def test_cmd_sql_report_writes_markdown(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    image_path = tmp_path / "out.png"
+    image_path.write_bytes(b"png")
+
+    class _Engine:
+        def execute_sql(self, **kwargs):
+            return {
+                "action": "select",
+                "api_prompt_path": str(tmp_path / "api_prompt.json"),
+                "downloaded_outputs": [str(image_path)],
+            }
+
+    monkeypatch.setattr(cli, "_build_sql_engine", lambda args: _Engine())
+    report_path = tmp_path / "report.md"
+    args = argparse.Namespace(
+        sql=(
+            "SELECT image FROM img2img_reference USING default_run CHARACTER char_matt "
+            "PROFILE mediumshot_natural WHERE prompt='x' AND seed=1;"
+        ),
+        sql_file=None,
+        host="127.0.0.1",
+        port=8188,
+        timeout=10.0,
+        no_cache=False,
+        compile_only=False,
+        upload_mode="strict",
+        download_output=True,
+        download_dir=None,
+        report=str(report_path),
+        title="My Report",
+        image=[],
+    )
+    rc = cli.cmd_sql_report(args)
+    assert rc == 0
+    text = report_path.read_text(encoding="utf-8")
+    assert "# My Report" in text
+    assert "## SQL" in text
+    assert "img2img_reference" in text
+    assert "char_matt" in text
+    assert "Character: `char_matt`" in text
+    assert "mediumshot_natural" in text
+    assert "![out.png](" in text
+    out = capsys.readouterr().out
+    assert "report_written path=" in out
+
+
+def test_cmd_sql_report_rejects_multiple_statements(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "_build_sql_engine", lambda args: object())
+    args = argparse.Namespace(
+        sql="SHOW TABLES; SHOW PROFILES;",
+        sql_file=None,
+        host="127.0.0.1",
+        port=8188,
+        timeout=10.0,
+        no_cache=False,
+        compile_only=False,
+        upload_mode="strict",
+        download_output=True,
+        download_dir=None,
+        report=None,
+        title=None,
+        image=[],
+    )
+    with pytest.raises(cli.CliError, match="exactly one SQL statement"):
+        cli.cmd_sql_report(args)
+
+
 def test_looks_like_link() -> None:
     assert cli._looks_like_link(["1", 0]) is True
     assert cli._looks_like_link([1, 0]) is True
@@ -152,6 +333,76 @@ def test_split_sql_statements_handles_multiple() -> None:
     assert len(statements) == 2
     assert statements[0].strip().endswith(";")
     assert "prompt='a'" in statements[0]
+
+
+def test_is_complete_sql_statement_supports_optional_semicolon() -> None:
+    assert cli._is_complete_sql_statement("SHOW TABLES") is True
+    assert cli._is_complete_sql_statement("SHOW TABLES;") is True
+    assert cli._is_complete_sql_statement("SELECT") is False
+
+
+def test_should_auto_execute_without_semicolon_only_for_single_line() -> None:
+    assert cli._should_auto_execute_without_semicolon(sql_text="SHOW TABLES", buffered_line_count=1) is True
+    assert cli._should_auto_execute_without_semicolon(sql_text="SHOW TABLES", buffered_line_count=2) is False
+    assert (
+        cli._should_auto_execute_without_semicolon(
+            sql_text="CREATE PROFILE starter_portrait_v1 WITH width=1024",
+            buffered_line_count=2,
+        )
+        is False
+    )
+
+
+def test_parse_report_sql_supports_optional_semicolon() -> None:
+    parsed = cli._parse_report_sql(
+        "REPORT SELECT image FROM img2img_controlnet USING char_nick PROFILE goldenhour_backlight "
+        "WHERE prompt='sunset street' AND seed=42 TO './examples/out.md'"
+    )
+    assert parsed is not None
+    inner_sql, report_path = parsed
+    assert "SELECT image FROM img2img_controlnet" in inner_sql
+    assert report_path == "./examples/out.md"
+
+    parsed2 = cli._parse_report_sql(
+        "REPORT SELECT image FROM img2img_controlnet USING char_nick PROFILE goldenhour_backlight "
+        "WHERE prompt='sunset street' AND seed=42 TO \"./examples/out2.md\";"
+    )
+    assert parsed2 is not None
+    inner_sql2, report_path2 = parsed2
+    assert "USING char_nick" in inner_sql2
+    assert report_path2 == "./examples/out2.md"
+
+
+def test_execute_sql_statement_routes_report_sql(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_report(**kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "_run_sql_report", _fake_report)
+
+    args = type(
+        "Args",
+        (),
+        {
+            "title": "",
+            "yes": False,
+        },
+    )()
+    engine = object()
+    cli._execute_sql_statement(
+        engine=engine,  # type: ignore[arg-type]
+        sql_text=(
+            "REPORT SELECT image FROM img2img_controlnet USING char_nick PROFILE goldenhour_backlight "
+            f"WHERE prompt='x' AND seed=1 TO '{tmp_path / 'from_terminal.md'}';"
+        ),
+        args=args,
+        statement_index=1,
+    )
+    assert seen["engine"] is engine
+    assert "SELECT image FROM img2img_controlnet" in str(seen["sql_text"])
+    assert Path(str(seen["report_path"])).name == "from_terminal.md"
 
 
 def test_cmd_sql_uses_sql_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -248,6 +499,38 @@ def test_cmd_sql_inline_sql_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(seen) == 1
 
 
+def test_collect_asset_files_all_prefers_assets_and_includes_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "repo"
+    assets_dir = workspace / "input" / "assets"
+    input_dir = workspace / "input"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / "a.png").write_bytes(b"a")
+    (input_dir / "a.png").write_bytes(b"legacy-a")
+    (input_dir / "b.png").write_bytes(b"b")
+    (input_dir / ".DS_Store").write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda: workspace)
+    files = cli._collect_asset_files(source=None, all_assets=True)
+    names = [p.name for p in files]
+    assert "a.png" in names
+    assert "b.png" in names
+    assert ".DS_Store" not in names
+    assert any(p == (assets_dir / "a.png").resolve() for p in files)
+    assert all(p != (input_dir / "a.png").resolve() for p in files)
+
+
+def test_collect_asset_files_all_supports_legacy_input_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "repo"
+    input_dir = workspace / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    (input_dir / "legacy.jpg").write_bytes(b"x")
+
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda: workspace)
+    files = cli._collect_asset_files(source=None, all_assets=True)
+    assert files == [(input_dir / "legacy.jpg").resolve()]
+
+
 def test_cmd_pull_success(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     class _Report:
         total = 3
@@ -293,6 +576,25 @@ def test_cmd_start_warns_when_no_models(monkeypatch: pytest.MonkeyPatch, capsys)
     assert "no synced models found" in out
 
 
+def test_error_hint_for_message_alias_issue() -> None:
+    hint = cli._error_hint_for_message("Unknown server alias 'remotee'. Available: remote")
+    assert hint is not None
+    assert "config init" in hint
+
+
+def test_error_hint_for_message_sql_parse() -> None:
+    hint = cli._error_hint_for_message("SQL parse failed: Unsupported SQL statement")
+    assert hint is not None
+    assert "EXPLAIN SELECT" in hint
+
+
+def test_print_error_with_hint_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    cli._print_error_with_hint("Unknown server alias 'x'", to_stderr=True)
+    err = capsys.readouterr().err
+    assert "Unknown server alias" in err
+    assert "hint:" in err
+
+
 def test_render_sql_result_plain_meta_actions(capsys: pytest.CaptureFixture[str]) -> None:
     cli._render_sql_result({"action": "set_meta", "table": "img2img_reference"})
     cli._render_sql_result({"action": "unset_meta", "table": "img2img_reference"})
@@ -321,3 +623,75 @@ def test_render_sql_result_styled_meta_actions(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(cli, "_ui", lambda: fake)
     cli._render_sql_result({"action": "set_meta", "table": "img2img_reference"})
     assert any("set_meta" in line for line in fake.lines)
+
+
+def test_render_sql_result_plain_show_tables_all_collapses_nodes(capsys: pytest.CaptureFixture[str]) -> None:
+    rows: list[dict[str, object]] = [
+        {"kind": "workflow", "table": "txt2img_empty_latent", "intent": "image_generation", "signature": "text_to_image"}
+    ]
+    rows.extend({"kind": "node", "table": f"Node{i}", "category": "core"} for i in range(20))
+    cli._render_sql_result({"action": "describe_tables", "table_filter": "all", "rows": rows})
+    out = capsys.readouterr().out
+    assert "tables_total=21" in out
+    assert "Node0" in out
+    assert "Node11" in out
+    assert "Node12" not in out
+    assert "SHOW TABLES nodes;" in out
+
+
+def test_render_sql_result_styled_show_tables_all_collapses_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeUI:
+        styled = True
+
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+            self.tables: list[tuple[str, list[list[str]]]] = []
+
+        def line(self, text: str) -> None:
+            self.lines.append(text)
+
+        def print_json(self, _payload: object) -> None:
+            self.lines.append("json")
+
+        def print_table(self, title: str, _headers: list[str], rows: list[list[str]]) -> None:
+            self.tables.append((title, rows))
+
+    fake = _FakeUI()
+    monkeypatch.setattr(cli, "_ui", lambda: fake)
+    rows: list[dict[str, object]] = [
+        {"kind": "workflow", "table": "txt2img_empty_latent", "intent": "image_generation", "signature": "text_to_image"}
+    ]
+    rows.extend({"kind": "node", "table": f"Node{i}", "category": "core"} for i in range(20))
+    cli._render_sql_result({"action": "describe_tables", "table_filter": "all", "rows": rows})
+    node_tables = [r for (title, r) in fake.tables if title == "NODES"]
+    assert node_tables
+    assert len(node_tables[0]) == 12
+    assert any("SHOW TABLES nodes;" in line for line in fake.lines)
+
+
+def test_render_sql_result_plain_character_object_actions(capsys: pytest.CaptureFixture[str]) -> None:
+    cli._render_sql_result(
+        {
+            "action": "show_characters",
+            "rows": [{"name": "char_matt", "workflow_count": 2, "binding_count": 3}],
+        }
+    )
+    cli._render_sql_result(
+        {
+            "action": "show_objects",
+            "rows": [{"name": "obj_hat", "workflow_count": 1, "binding_count": 1}],
+        }
+    )
+    cli._render_sql_result({"action": "describe_character", "name": "char_matt", "binding_count": 1, "bindings": []})
+    out = capsys.readouterr().out
+    assert "characters_count=1" in out
+    assert "objects_count=1" in out
+    assert "char_matt" in out
+    assert "obj_hat" in out
+
+
+def test_sql_terminal_hints_include_character_object_commands() -> None:
+    assert "SHOW CHARACTERS" in cli.SQL_TERMINAL_HINTS
+    assert "SHOW OBJECTS" in cli.SQL_TERMINAL_HINTS
+    assert "DESCRIBE CHARACTER" in cli.SQL_TERMINAL_HINTS
+    assert "DESCRIBE OBJECT" in cli.SQL_TERMINAL_HINTS

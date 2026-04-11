@@ -2,7 +2,7 @@
 name: connectivity_triage
 description: Triage remote connectivity quickly by chaining status and doctor checks in one diagnostic flow.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🌐","requires":{"bins":["comfy-agent","bash"]}}}
+metadata: {"openclaw":{"emoji":"🌐","requires":{"bins":["comfysql","bash"]}}}
 ---
 
 # connectivity_triage
@@ -11,7 +11,7 @@ Use this skill when commands fail and you need quick health diagnostics.
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Server alias exists in config.
 
 ## Execution

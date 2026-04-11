@@ -1,13 +1,15 @@
 -- comfysql_query_ops read-only command pack
 -- Run:
 -- REPO_ROOT="$(cd "$(dirname "$0")"/../.. && pwd)"
--- comfy-agent sql remote --sql-file "${REPO_ROOT}/openclaw/comfysql_query_ops/comfysql_query_ops.sql"
+-- comfysql sql remote --sql-file "${REPO_ROOT}/openclaw/comfysql_query_ops/comfysql_query_ops.sql"
 
 -- 1) inventory
 SHOW TABLES;
 SHOW WORKFLOWS;
 SHOW PRESETS;
 SHOW PROFILES;
+SHOW CHARACTERS;
+SHOW OBJECTS;
 
 -- 2) workflow + metadata inspection
 DESCRIBE WORKFLOW txt2img_empty_latent;
@@ -17,6 +19,9 @@ DESCRIBE WORKFLOW img2img_2_inputs;
 -- 3) preset/profile inspection
 DESCRIBE PRESET default_run FOR txt2img_empty_latent;
 DESCRIBE PROFILE standard_50mm;
+-- Optional if aliases exist:
+-- DESCRIBE CHARACTER char_matt;
+-- DESCRIBE OBJECT obj_hat;
 
 -- 4) dry-run explain before generation
 EXPLAIN SELECT image FROM txt2img_empty_latent

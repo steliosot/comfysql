@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from comfy_custom.sql_engine import (
+    CharacterBindingRegistry,
     LocalComfySQLEngine,
     PresetRegistry,
     ProfileRegistry,
@@ -131,7 +132,23 @@ def test_profile_registry_roundtrip(tmp_path: Path) -> None:
     assert registry.get("portrait") is None
 
 
-def test_preset_and_profile_registry_reject_future_version(tmp_path: Path) -> None:
+def test_character_binding_registry_roundtrip(tmp_path: Path) -> None:
+    registry = CharacterBindingRegistry(tmp_path / "sql_character_bindings.json")
+    spec = registry.upsert(
+        workflow_table="img2img_controlnet",
+        character_name="char_bets",
+        binding_key="input_image",
+        binding_value="bets.png",
+    )
+    assert spec.workflow_table == "img2img_controlnet"
+    assert spec.character_name == "char_bets"
+    assert spec.binding_key == "input_image"
+    rows = registry.list_for(workflow_table="img2img_controlnet", character_name="char_bets")
+    assert len(rows) == 1
+    assert rows[0].binding_value == "bets.png"
+
+
+def test_preset_profile_and_character_registry_reject_future_version(tmp_path: Path) -> None:
     preset_path = tmp_path / "sql_presets.json"
     preset_path.write_text(json.dumps({"version": 99, "presets": []}), encoding="utf-8")
     with pytest.raises(SQLEngineError):
@@ -141,6 +158,11 @@ def test_preset_and_profile_registry_reject_future_version(tmp_path: Path) -> No
     profile_path.write_text(json.dumps({"version": 99, "profiles": []}), encoding="utf-8")
     with pytest.raises(SQLEngineError):
         ProfileRegistry(profile_path).load()
+
+    character_path = tmp_path / "sql_character_bindings.json"
+    character_path.write_text(json.dumps({"version": 99, "bindings": []}), encoding="utf-8")
+    with pytest.raises(SQLEngineError):
+        CharacterBindingRegistry(character_path).load()
 
 
 def test_parse_create_drop_sql(tmp_path: Path) -> None:
@@ -233,6 +255,49 @@ def test_sql_parser_supports_from_alias_and_dotted_where(tmp_path: Path) -> None
     assert q3.profile_name == "portrait"
     assert q3.where["seed"] == 7
 
+    q4 = parse_sql(
+        "SELECT image FROM img2img_controlnet USING default_run CHARACTER char_bets PROFILE goldenhour_backlight "
+        "WHERE seed=9;"
+    )
+    assert q4.table_name == "img2img_controlnet"
+    assert q4.preset_name == "default_run"
+    assert q4.character_name == "char_bets"
+    assert q4.profile_name == "goldenhour_backlight"
+    assert q4.where["seed"] == 9
+
+    q5 = parse_sql(
+        "SELECT image FROM img2img_2_inputs USING default_run CHARACTER char_matt OBJECT obj_hat "
+        "PROFILE goldenhour_backlight WHERE seed=7;"
+    )
+    assert q5.character_name == "char_matt"
+    assert q5.object_name == "obj_hat"
+    assert q5.profile_name == "goldenhour_backlight"
+
+
+def test_sql_parser_rejects_character_after_profile(tmp_path: Path) -> None:
+    from comfy_custom.comfysql_runner.sql_parser import SQLParseError, parse_sql
+
+    with pytest.raises(SQLParseError):
+        parse_sql("SELECT image FROM img2img_controlnet USING default_run PROFILE goldenhour_backlight CHARACTER char_bets WHERE seed=1;")
+
+
+def test_sql_parser_supports_multiline_explain(tmp_path: Path) -> None:
+    from comfy_custom.comfysql_runner.sql_parser import parse_sql
+
+    q = parse_sql(
+        "EXPLAIN\n"
+        "SELECT image\n"
+        "FROM txt2img_empty_latent\n"
+        "USING default_run\n"
+        "PROFILE goldenhour_backlight\n"
+        "WHERE prompt='cinematic portrait' AND seed=123;"
+    )
+    assert q.explain is True
+    assert q.table_name == "txt2img_empty_latent"
+    assert q.preset_name == "default_run"
+    assert q.profile_name == "goldenhour_backlight"
+    assert q.where["seed"] == 123
+
 
 def test_sql_parser_supports_show_tables_filter(tmp_path: Path) -> None:
     from comfy_custom.comfysql_runner.sql_parser import parse_sql
@@ -254,6 +319,41 @@ def test_sql_parser_supports_show_tables_filter(tmp_path: Path) -> None:
 
     q6 = parse_sql("SHOW NODES;")
     assert q6.filter_kind == "nodes"
+
+
+def test_sql_parser_supports_character_and_object_commands(tmp_path: Path) -> None:
+    from comfy_custom.comfysql_runner.sql_parser import parse_sql
+
+    show_characters = parse_sql("SHOW CHARACTERS;")
+    assert show_characters.__class__.__name__ == "ShowCharactersQuery"
+
+    show_objects = parse_sql("SHOW OBJECTS;")
+    assert show_objects.__class__.__name__ == "ShowObjectsQuery"
+
+    describe_character = parse_sql("DESCRIBE CHARACTER char_matt;")
+    assert describe_character.__class__.__name__ == "DescribeCharacterQuery"
+    assert describe_character.character_name == "char_matt"
+
+    describe_object = parse_sql("DESCRIBE OBJECT obj_hat;")
+    assert describe_object.__class__.__name__ == "DescribeObjectQuery"
+    assert describe_object.object_name == "obj_hat"
+
+    create_character = parse_sql("CREATE CHARACTER char_matt WITH image='matt.png';")
+    assert create_character.__class__.__name__ == "CreateCharacterQuery"
+    assert create_character.character_name == "char_matt"
+    assert create_character.image_name == "matt.png"
+
+    create_object = parse_sql("CREATE OBJECT obj_hat WITH image='hat.jpg';")
+    assert create_object.__class__.__name__ == "CreateObjectQuery"
+    assert create_object.object_name == "obj_hat"
+    assert create_object.image_name == "hat.jpg"
+
+    create_slot = parse_sql("CREATE SLOT subject FOR img2img_2_inputs AS CHARACTER BINDING 198.image;")
+    assert create_slot.__class__.__name__ == "CreateWorkflowSlotQuery"
+    assert create_slot.slot_name == "subject"
+    assert create_slot.workflow_table == "img2img_2_inputs"
+    assert create_slot.slot_kind == "character"
+    assert create_slot.binding_key == "198.image"
 
 
 def test_sql_parser_supports_preset_commands(tmp_path: Path) -> None:
@@ -556,6 +656,116 @@ def test_create_table_validation_failure_blocks_register(
     assert engine.registry.get("bad") is None
 
 
+def test_show_and_describe_characters_and_objects(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_chars.json"
+    wf.write_text(json.dumps({"1": {"class_type": "LoadImage", "inputs": {"image": "x.png"}}}), encoding="utf-8")
+    engine.registry.create_table("img2img_2_inputs", wf)
+    engine.character_binding_registry.upsert(
+        workflow_table="img2img_2_inputs",
+        character_name="char_matt",
+        binding_key="input_image",
+        binding_value="matt.png",
+    )
+    engine.character_binding_registry.upsert(
+        workflow_table="img2img_2_inputs",
+        character_name="obj_hat",
+        binding_key="style_image",
+        binding_value="hat.jpg",
+    )
+
+    show_characters = engine.execute_sql(
+        "SHOW CHARACTERS;",
+        compile_only=False,
+        no_cache=False,
+        timeout=30.0,
+        statement_index=1,
+    )
+    assert show_characters["action"] == "show_characters"
+    names = [row["name"] for row in show_characters["rows"]]
+    assert "char_matt" in names
+    assert "obj_hat" not in names
+
+    show_objects = engine.execute_sql(
+        "SHOW OBJECTS;",
+        compile_only=False,
+        no_cache=False,
+        timeout=30.0,
+        statement_index=2,
+    )
+    assert show_objects["action"] == "show_objects"
+    object_names = [row["name"] for row in show_objects["rows"]]
+    assert "obj_hat" in object_names
+    assert "char_matt" not in object_names
+
+    describe_character = engine.execute_sql(
+        "DESCRIBE CHARACTER char_matt;",
+        compile_only=False,
+        no_cache=False,
+        timeout=30.0,
+        statement_index=3,
+    )
+    assert describe_character["action"] == "describe_character"
+    assert describe_character["name"] == "char_matt"
+    assert describe_character["binding_count"] == 1
+
+    describe_object = engine.execute_sql(
+        "DESCRIBE OBJECT obj_hat;",
+        compile_only=False,
+        no_cache=False,
+        timeout=30.0,
+        statement_index=4,
+    )
+    assert describe_object["action"] == "describe_object"
+    assert describe_object["name"] == "obj_hat"
+    assert describe_object["binding_count"] == 1
+
+
+def test_select_resolves_character_and_object_via_relational_slots(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_relational.json"
+    wf.write_text(
+        json.dumps(
+            {
+                "198": {"class_type": "LoadImage", "inputs": {"image": "old_subject.png"}},
+                "213": {"class_type": "LoadImage", "inputs": {"image": "old_object.png"}},
+                "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "x"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    engine.registry.create_table("img2img_2_inputs", wf)
+    engine.asset_alias_registry.upsert(alias_name="char_matt", kind="character", image_name="matt.png")
+    engine.asset_alias_registry.upsert(alias_name="obj_hat", kind="object", image_name="hat.jpg")
+    engine.workflow_slot_registry.upsert(
+        workflow_table="img2img_2_inputs",
+        slot_name="subject",
+        slot_kind="character",
+        binding_key="198.image",
+    )
+    engine.workflow_slot_registry.upsert(
+        workflow_table="img2img_2_inputs",
+        slot_name="object",
+        slot_kind="object",
+        binding_key="213.image",
+    )
+    engine._validate_compiled_prompt = lambda prompt: {"status": "ok", "nodes": 3, "edges": 0, "checked_models": [], "checked_assets": []}  # type: ignore[method-assign]
+
+    result = engine.execute_sql(
+        "EXPLAIN SELECT image FROM img2img_2_inputs CHARACTER char_matt OBJECT obj_hat;",
+        compile_only=False,
+        no_cache=False,
+        timeout=30.0,
+        statement_index=1,
+    )
+    assert result["action"] == "explain"
+    assert result["resolved_layers"]["character"] == "char_matt"
+    assert result["resolved_layers"]["object"] == "obj_hat"
+    prompt = result["prompt"]
+    assert prompt["198"]["inputs"]["image"] == "matt.png"
+    assert prompt["213"]["inputs"]["image"] == "hat.jpg"
+
+
 def test_sql_parser_supports_profile_commands(tmp_path: Path) -> None:
     from comfy_custom.comfysql_runner.sql_parser import parse_sql
 
@@ -609,6 +819,105 @@ def test_merge_profile_preset_where_precedence(tmp_path: Path) -> None:
     assert merged["cfg"] == 7
     assert merged["steps"] == 20
     assert merged["width"] == 1024
+
+
+def test_merge_profile_preset_character_where_precedence(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    engine.preset_registry.upsert(
+        template_name="img2img_controlnet",
+        preset_name="default_run",
+        params={"seed": 1, "cfg": 7, "input_image": "preset.png"},
+    )
+    engine.character_binding_registry.upsert(
+        workflow_table="img2img_controlnet",
+        character_name="char_bets",
+        binding_key="input_image",
+        binding_value="bets.png",
+    )
+    engine.profile_registry.upsert(
+        profile_name="goldenhour_backlight",
+        params={"cfg": 10, "lighting_time": "golden hour"},
+    )
+
+    merged, resolved = engine._merge_profile_preset_character_where(
+        table_name="img2img_controlnet",
+        preset_name="default_run",
+        character_name="char_bets",
+        profile_name="goldenhour_backlight",
+        where={"cfg": 12, "prompt": "x"},
+    )
+    assert merged["input_image"] == "bets.png"
+    assert merged["cfg"] == 12
+    assert "golden hour" in str(merged.get("prompt", "")).lower()
+    assert resolved["preset"] == "default_run"
+    assert resolved["character"] == "char_bets"
+    assert resolved["profile"] == "goldenhour_backlight"
+
+
+def test_merge_profile_preset_character_where_supports_using_character_shorthand(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    engine.character_binding_registry.upsert(
+        workflow_table="img2img_controlnet",
+        character_name="char_bets",
+        binding_key="input_image",
+        binding_value="bets.png",
+    )
+
+    merged, resolved = engine._merge_profile_preset_character_where(
+        table_name="img2img_controlnet",
+        preset_name="char_bets",
+        character_name=None,
+        profile_name=None,
+        where={"prompt": "x"},
+    )
+    assert merged["input_image"] == "bets.png"
+    assert resolved["preset"] == ""
+    assert resolved["character"] == "char_bets"
+
+
+def test_merge_profile_preset_character_where_preset_wins_on_name_conflict(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    engine.preset_registry.upsert(
+        template_name="img2img_controlnet",
+        preset_name="char_bets",
+        params={"input_image": "preset.png"},
+    )
+    engine.character_binding_registry.upsert(
+        workflow_table="img2img_controlnet",
+        character_name="char_bets",
+        binding_key="input_image",
+        binding_value="bets.png",
+    )
+
+    merged, resolved = engine._merge_profile_preset_character_where(
+        table_name="img2img_controlnet",
+        preset_name="char_bets",
+        character_name=None,
+        profile_name=None,
+        where={},
+    )
+    assert merged["input_image"] == "preset.png"
+    assert resolved["preset"] == "char_bets"
+    assert resolved["character"] == ""
+    assert "Use `CHARACTER char_bets`" in str(resolved.get("hint", ""))
+
+
+def test_merge_profile_preset_character_where_errors_for_missing_character_binding(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    engine.character_binding_registry.upsert(
+        workflow_table="img2img_reference",
+        character_name="char_bets",
+        binding_key="input_image",
+        binding_value="bets.png",
+    )
+    with pytest.raises(SQLEngineError):
+        engine._merge_profile_preset_character_where(
+            table_name="img2img_controlnet",
+            preset_name=None,
+            character_name="char_bets",
+            profile_name=None,
+            where={},
+        )
 
 
 def test_auto_upload_local_assets_maps_assets_and_root_and_skips_existing(tmp_path: Path) -> None:
@@ -693,6 +1002,45 @@ def test_auto_upload_local_assets_resolves_assets_shorthand(tmp_path: Path) -> N
     assert uploaded_targets == [("", "woman.jpg")]
 
 
+def test_auto_upload_local_assets_resolves_legacy_input_root_shorthand(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    data_root = engine.comfy_dir.parent
+    woman_file = data_root / "input" / "woman.jpg"
+    woman_file.parent.mkdir(parents=True, exist_ok=True)
+    woman_file.write_bytes(b"a")
+
+    uploaded_targets: list[tuple[str, str]] = []
+
+    def fake_exists(*, filename: str, subfolder: str, timeout: float) -> bool:
+        return False
+
+    def fake_upload(
+        *,
+        local_path: Path,
+        remote_filename: str,
+        remote_subfolder: str,
+        endpoint: str,
+        file_field: str,
+        timeout: float,
+    ) -> None:
+        uploaded_targets.append((remote_subfolder, remote_filename))
+
+    engine._remote_input_exists = fake_exists  # type: ignore[method-assign]
+    engine._upload_input_file = fake_upload  # type: ignore[method-assign]
+
+    prompt = {
+        "1": {"class_type": "LoadImage", "inputs": {"image": "assets/woman.jpg"}},
+        "2": {"class_type": "LoadImage", "inputs": {"image": "woman.jpg"}},
+    }
+    patched, report = engine._auto_upload_local_assets(prompt, timeout=10.0)
+
+    assert patched["1"]["inputs"]["image"] == "woman.jpg"
+    assert patched["2"]["inputs"]["image"] == "woman.jpg"
+    assert report["uploaded_count"] == 2
+    assert report["failed_count"] == 0
+    assert uploaded_targets == [("", "woman.jpg")]
+
+
 def test_auto_upload_local_assets_records_failures(tmp_path: Path) -> None:
     engine = _make_engine(tmp_path)
     image_file = tmp_path / "x.png"
@@ -725,6 +1073,27 @@ def test_auto_upload_local_assets_records_failures(tmp_path: Path) -> None:
     assert report["skipped_existing_count"] == 0
     assert report["failed_count"] == 1
     assert report["failed"][0]["remote_path"] == "x.png"
+
+
+def test_extract_saveimage_prefixes_and_download_by_prefix(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    prompt = {
+        "1": {"class_type": "SaveImage", "inputs": {"filename_prefix": "demo_run"}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "x"}},
+    }
+    prefixes = engine._extract_saveimage_prefixes(prompt)
+    assert prefixes == ["demo_run"]
+
+    def fake_read_bytes(path: str, timeout: float = 30.0) -> bytes:
+        if "demo_run_00001_.png" in path:
+            return b"pngdata"
+        raise SQLEngineError("Failed GET bytes /view?...: HTTP Error 404: Not Found", exit_code=4)
+
+    engine._read_bytes = fake_read_bytes  # type: ignore[method-assign]
+    report = engine._download_outputs_by_prefixes(prefixes=prefixes, output_dir=tmp_path / "out", timeout=5.0)
+    assert len(report["downloaded"]) == 1
+    assert Path(report["downloaded"][0]).exists()
+    assert report["failed"] == []
 
 
 def test_normalize_asset_binding_preserves_non_assets_prefix(tmp_path: Path) -> None:

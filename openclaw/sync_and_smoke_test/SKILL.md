@@ -2,7 +2,7 @@
 name: sync_and_smoke_test
 description: Refresh schema/model visibility with sync and verify readiness via a compile-only smoke query.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🔄","requires":{"bins":["comfy-agent","bash"]}}}
+metadata: {"openclaw":{"emoji":"🔄","requires":{"bins":["comfysql","bash"]}}}
 ---
 
 # sync_and_smoke_test
@@ -11,7 +11,7 @@ Use this skill after server updates or model changes to confirm readiness.
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - At least one workflow table exists (for example `txt2img_empty_latent`).
 
 ## Execution

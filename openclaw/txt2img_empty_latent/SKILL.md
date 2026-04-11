@@ -2,7 +2,7 @@
 name: txt2img_empty_latent
 description: Run text-to-image generation through the txt2img_empty_latent ComfySQL workflow with preset/profile combinations.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🖼️","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🖼️","requires":{"bins":["comfysql"]}}}
 ---
 
 # txt2img_empty_latent
@@ -11,7 +11,7 @@ Use this skill to generate images from the `txt2img_empty_latent` workflow table
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - SQL workflow table exists:
   - `CREATE TABLE txt2img_empty_latent AS WORKFLOW '${REPO_ROOT}/input/workflows/txt2img_empty_latent.json';`
 - Optional presets/profiles exist (for example `default_run`, `rapid_grid_512`, `standard_50mm`).

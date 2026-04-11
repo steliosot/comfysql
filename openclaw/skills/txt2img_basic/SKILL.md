@@ -1,21 +1,23 @@
 ---
 name: txt2img_basic
-description: Generate one image from the txt2img_empty workflow table using ComfySQL with optional preset/profile and explicit prompt+seed overrides.
+description: Generate one image from the txt2img_empty_latent workflow table using ComfySQL with preset/profile and prompt+seed overrides.
 user-invocable: true
+metadata: {"openclaw":{"emoji":"🧱","requires":{"bins":["comfysql"]}}}
 ---
 
 # txt2img_basic
 
-Use this skill when an agent needs a single-step text-to-image generation via `comfy-agent sql`.
-This skill is designed for tool orchestration systems (for example OpenClaw) that need a predictable command contract and deterministic outputs.
+Use this skill when an agent needs one reliable text-to-image run via `comfysql sql remote`.
 
 ## Preconditions
 
-- `comfy-agent` is installed in the active environment.
-- Comfy server can be started by `comfy-agent`.
-- SQL table `txt2img_empty` exists:
-  - `CREATE TABLE txt2img_empty AS WORKFLOW '/absolute/path/to/s_txt2img_empty_latent.json';`
-- A valid checkpoint exists in Comfy models (example: `juggernaut_reborn.safetensors`).
+- `comfysql` is installed in the active environment (`comfy-agent` compatibility alias is also supported).
+- Comfy server can be started by `comfysql`.
+- SQL table `txt2img_empty_latent` exists:
+  - `CREATE TABLE txt2img_empty_latent AS WORKFLOW '${REPO_ROOT}/input/workflows/txt2img_empty_latent.json';`
+- Recommended preset/profile exist:
+  - `default_run`
+  - `standard_50mm`
 
 ## Inputs
 
@@ -24,8 +26,8 @@ Required:
 - `seed` (integer)
 
 Optional:
-- `preset` (string, default: `zehra_1`)
-- `profile` (string, default: `cinematic_portrait`)
+- `preset` (string, default: `default_run`)
+- `profile` (string, default: `standard_50mm`)
 - `negative_prompt` (string)
 - `steps` (integer)
 - `cfg` (float)
@@ -39,26 +41,20 @@ Optional:
 ### Path A: preset + profile (recommended)
 
 ```bash
-comfy-agent sql --sql "SELECT image FROM txt2img_empty USING ${preset} PROFILE ${profile} WHERE prompt='${prompt}' AND seed=${seed};"
+comfysql sql remote --sql "SELECT image FROM txt2img_empty_latent USING ${preset} PROFILE ${profile} WHERE prompt='${prompt}' AND seed=${seed};"
 ```
 
-### Path B: explicit overrides (no preset/profile)
+Dry-run validation (compile only):
 
 ```bash
-comfy-agent sql --sql "SELECT image FROM txt2img_empty WHERE ckpt_name='juggernaut_reborn.safetensors' AND prompt='${prompt}' AND seed=${seed};"
-```
-
-### Dry-run validation (compile only)
-
-```bash
-comfy-agent sql --compile-only --sql "SELECT image FROM txt2img_empty USING ${preset} PROFILE ${profile} WHERE prompt='${prompt}' AND seed=${seed};"
+comfysql sql remote --compile-only --sql "SELECT image FROM txt2img_empty_latent USING ${preset} PROFILE ${profile} WHERE prompt='${prompt}' AND seed=${seed};"
 ```
 
 ## Output Contract
 
 On success, capture and return:
 - `status`: `success`
-- `table`: `txt2img_empty`
+- `table`: `txt2img_empty_latent`
 - `prompt`
 - `seed`
 - `preset` (if used)
@@ -74,10 +70,9 @@ On failure, return:
 
 ## Error Handling
 
-- If prompt submit fails with model validation (`ckpt_name` not allowed), retry with a valid checkpoint name from server validation output.
 - If preset/profile is missing, run:
-  - `comfy-agent sql --sql "SHOW PRESETS;"`
-  - `comfy-agent sql --sql "SHOW PROFILES;"`
+  - `comfysql sql remote --sql "SHOW PRESETS;"`
+  - `comfysql sql remote --sql "SHOW PROFILES;"`
 - If table is missing, create it with `CREATE TABLE ... AS WORKFLOW` and retry.
 
 ## Recommended Agent Policy
@@ -90,5 +85,5 @@ On failure, return:
 ## Example Invocation
 
 ```bash
-comfy-agent sql --sql "SELECT image FROM txt2img_empty USING zehra_1 PROFILE cinematic_portrait WHERE prompt='a cinematic portrait of a woman' AND seed=12345;"
+comfysql sql remote --sql "SELECT image FROM txt2img_empty_latent USING default_run PROFILE standard_50mm WHERE prompt='a cinematic portrait of a woman' AND seed=12345;"
 ```

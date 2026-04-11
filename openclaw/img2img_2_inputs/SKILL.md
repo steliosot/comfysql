@@ -2,7 +2,7 @@
 name: img2img_2_inputs
 description: Run multi-reference identity-preserving image-to-image generation with the img2img_2_inputs ComfySQL workflow.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🧩","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🧩","requires":{"bins":["comfysql"]}}}
 ---
 
 # img2img_2_inputs
@@ -11,7 +11,7 @@ Use this skill when a workflow combines two image references plus prompt guidanc
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - SQL workflow table exists:
   - `CREATE TABLE img2img_2_inputs AS WORKFLOW '${REPO_ROOT}/input/workflows/img2img_2_inputs.json';`
 - Preset exists (recommended): `default_run`.

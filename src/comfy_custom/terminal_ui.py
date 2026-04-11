@@ -29,6 +29,48 @@ class TerminalUI:
         else:
             print(text, flush=True)
 
+    def section(self, text: str) -> None:
+        if self.styled:
+            self.console.print(f"[bold cyan]{text}[/]")
+        else:
+            print(text, flush=True)
+
+    def info(self, text: str) -> None:
+        if self.styled:
+            self.console.print(f"[cyan]{text}[/]")
+        else:
+            print(text, flush=True)
+
+    def success(self, text: str) -> None:
+        if self.styled:
+            self.console.print(f"[green]{text}[/]")
+        else:
+            print(text, flush=True)
+
+    def warning(self, text: str) -> None:
+        if self.styled:
+            self.console.print(f"[yellow]{text}[/]")
+        else:
+            print(text, flush=True)
+
+    def error(self, text: str) -> None:
+        if self.styled:
+            self.console.print(f"[red]{text}[/]")
+        else:
+            print(text, flush=True)
+
+    def hint(self, text: str) -> None:
+        if self.styled:
+            self.console.print(f"[yellow]hint:[/] {text}")
+        else:
+            print(f"hint: {text}", flush=True)
+
+    def kv(self, label: str, value: str) -> None:
+        if self.styled:
+            self.console.print(f"[bold]{label}[/]: {value}")
+        else:
+            print(f"{label}: {value}", flush=True)
+
     def print_json(self, payload: dict[str, Any]) -> None:
         if self.styled:
             self.console.print(JSON.from_data(payload))
@@ -97,4 +139,3 @@ class TerminalUI:
             except Exception:
                 pass
             self.console.print(f"[bold red]{message}[/]")
-

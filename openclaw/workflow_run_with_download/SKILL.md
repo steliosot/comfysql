@@ -2,7 +2,7 @@
 name: workflow_run_with_download
 description: Run ComfySQL SELECT workflows and download generated outputs locally in a single command flow.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"📥","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"📥","requires":{"bins":["comfysql"]}}}
 ---
 
 # workflow_run_with_download
@@ -11,7 +11,7 @@ Use this skill when you want reproducible workflow runs with local output downlo
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 - Target workflow table exists.
 
 ## Execution
@@ -22,7 +22,7 @@ Run the SQL examples in:
 
 Then run:
 
-- `comfy-agent sql remote --sql-file ${REPO_ROOT}/openclaw/workflow_run_with_download/workflow_run_with_download.sql --download-output --download-dir ${REPO_ROOT}/output`
+- `comfysql sql remote --sql-file ${REPO_ROOT}/openclaw/workflow_run_with_download/workflow_run_with_download.sql --download-output --download-dir ${REPO_ROOT}/output`
 
 ## Expected Output
 

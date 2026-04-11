@@ -1,7 +1,7 @@
 -- preset_profile_manage command pack (no-create)
 -- Run:
 -- REPO_ROOT="$(cd "$(dirname "$0")"/../.. && pwd)"
--- comfy-agent sql remote --sql-file "${REPO_ROOT}/openclaw/preset_profile_manage/preset_profile_manage.sql"
+-- comfysql sql remote --sql-file "${REPO_ROOT}/openclaw/preset_profile_manage/preset_profile_manage.sql"
 
 SHOW PRESETS;
 SHOW PROFILES;

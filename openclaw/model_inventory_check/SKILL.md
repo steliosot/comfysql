@@ -2,7 +2,7 @@
 name: model_inventory_check
 description: Query live server model inventory through ComfySQL models table for checkpoints, loras, and related assets.
 user-invocable: true
-metadata: {"openclaw":{"emoji":"🧱","requires":{"bins":["comfy-agent"]}}}
+metadata: {"openclaw":{"emoji":"🧱","requires":{"bins":["comfysql"]}}}
 ---
 
 # model_inventory_check
@@ -11,7 +11,7 @@ Use this skill before generation to verify model names available on the server.
 
 ## Preconditions
 
-- `comfy-agent` is installed.
+- `comfysql` is installed (`comfy-agent` compatibility alias is also supported).
 
 ## Execution
 
