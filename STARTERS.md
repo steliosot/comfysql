@@ -10,6 +10,12 @@ Connect to the ComfySQL server:
 comfysql sql remote
 ```
 
+Before running generation queries, sync schema/model inventory once:
+
+```bash
+comfysql sync remote
+```
+
 If you want the outputs to be downloaded locally:
 
 ```bash
@@ -143,6 +149,12 @@ AND filename_prefix='txt2img_seed123_1';
 ```
 
 > `EXPLAIN` compiles and validates the query but does not execute it.
+> If you get `validation_failed: ... unknown class_type ...`, refresh and re-import the workflow from your current Comfy instance:
+>
+> ```bash
+> comfysql sync remote
+> comfysql sql remote --sql "CREATE TABLE txt2img_empty_latent AS WORKFLOW 'input/workflows/txt2img_empty_latent.json';"
+> ```
 
 Run the workflow:
 

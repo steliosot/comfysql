@@ -449,10 +449,6 @@ def parse_sql(sql: str) -> SQLQuery:
     if upper == "PING COMFY":
         return PingComfyQuery()
 
-    describe_match = re.match(r"^DESCRIBE\s+([a-zA-Z_][a-zA-Z0-9_]*)$", statement, flags=re.IGNORECASE)
-    if describe_match:
-        return DescribeQuery(target=describe_match.group(1))
-
     describe_workflow_match = re.match(
         r"^DESCRIBE\s+WORKFLOW\s+([a-zA-Z_][a-zA-Z0-9_]*)$",
         statement,
@@ -468,6 +464,10 @@ def parse_sql(sql: str) -> SQLQuery:
     )
     if show_workflow_match:
         return DescribeQuery(target=show_workflow_match.group(1))
+
+    describe_match = re.match(r"^DESCRIBE\s+([a-zA-Z_][a-zA-Z0-9_]*)$", statement, flags=re.IGNORECASE)
+    if describe_match:
+        return DescribeQuery(target=describe_match.group(1))
 
     describe_preset_match = re.match(
         r"^DESCRIBE\s+PRESET\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+FOR\s+([a-zA-Z_][a-zA-Z0-9_]*)$",

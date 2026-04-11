@@ -3,15 +3,16 @@ from __future__ import annotations
 import atexit
 import argparse
 import copy
+import contextlib
 import json
 import os
 import random
-import re
 import subprocess
 import sys
 import time
 import uuid
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
@@ -26,12 +27,21 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8188
 DEFAULT_START_TIMEOUT = 300.0
 DEFAULT_SUBMIT_TIMEOUT = 600.0
-DEFAULT_CONFIG_FILE = "comfy-agent.json"
+EXIT_PARSE = 2
+EXIT_AUTH = 3
+EXIT_NETWORK = 4
+EXIT_VALIDATION = 5
+EXIT_RUNTIME = 6
+PRIMARY_CONFIG_FILE = "comfysql.json"
+LEGACY_CONFIG_FILE = "comfy-agent.json"
+DEFAULT_CONFIG_FILE = PRIMARY_CONFIG_FILE
 _UI: TerminalUI | None = None
 _REQUEST_HEADERS: dict[str, str] = {}
 _HTTP_SCHEME = "http"
 _WS_SCHEME = "ws"
 _TARGET_REMOTE = False
+_LEGACY_CONFIG_HINT_SHOWN = False
+_OUTPUT_FORMAT = "text"
 
 
 class CliError(Exception):
@@ -61,6 +71,8 @@ class ConnectionSettings:
 
 
 def log(message: str) -> None:
+    if _OUTPUT_FORMAT == "json":
+        return
     _ui().info(f"[comfy-agent] {message}")
 
 
@@ -89,6 +101,10 @@ def _error_hint_for_message(message: str) -> str | None:
         return "Create a binding with `CREATE SLOT <slot> FOR <workflow> AS CHARACTER|OBJECT BINDING <node.input>;`."
     if "sql parse failed" in text or "unsupported sql statement" in text:
         return "Try `EXPLAIN SELECT ...;` and use ';' at the end for multiline SQL."
+    if "confirmation required for state-changing sql" in text:
+        return "Re-run with `-y` for non-interactive execution."
+    if "unknown table/node" in text:
+        return "Run `SHOW TABLES;` or `SHOW TABLES nodes;` and retry with a valid name."
     if "upload_failed" in text or "copy_failed" in text:
         return "Retry with `comfysql copy-assets <server> --all` and verify `comfysql doctor <server>`."
     if "download_failed" in text:
@@ -104,6 +120,93 @@ def _print_error_with_hint(message: str, *, to_stderr: bool = False) -> None:
     hint = _error_hint_for_message(message)
     if hint:
         print(f"hint: {hint}", file=target, flush=True)
+
+
+def _wants_json(args: argparse.Namespace) -> bool:
+    return str(getattr(args, "output", "text") or "text").strip().lower() == "json"
+
+
+def _set_output_mode(args: argparse.Namespace) -> None:
+    global _OUTPUT_FORMAT
+    _OUTPUT_FORMAT = "json" if _wants_json(args) else "text"
+
+
+def _emit_json(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=True), flush=True)
+
+
+def _capture_stdout_call(func, *args, **kwargs):
+    buf = StringIO()
+    with contextlib.redirect_stdout(buf):
+        result = func(*args, **kwargs)
+    events = [line for line in buf.getvalue().splitlines() if line.strip()]
+    return result, events
+
+
+def _normalized_error_exit_code(message: str, original_code: int | None = None) -> int:
+    if original_code == 130:
+        return 130
+    text = str(message or "").strip().lower()
+    if not text:
+        return EXIT_RUNTIME
+
+    parse_markers = (
+        "unsupported sql statement",
+        "sql parse failed",
+        "invalid report syntax",
+        "no sql statements found",
+        "config file must be a json object",
+        "invalid config json",
+        "unknown server alias",
+        "use either --sql or --sql-file",
+        "missing workflow path",
+        "not found:",
+    )
+    auth_markers = ("401", "403", "unauthorized", "forbidden", "auth header", "invalid token")
+    network_markers = (
+        "timed out waiting for server",
+        "connection failed",
+        "websocket connection failed",
+        "urlopen error",
+        "nodename nor servname provided",
+        "failed to fetch history",
+        "download_failed",
+    )
+    validation_markers = (
+        "validation_failed",
+        "validation failed",
+        "missing preset",
+        "missing profile",
+        "unknown preset",
+        "unknown profile",
+        "unknown workflow table",
+    )
+
+    if any(marker in text for marker in parse_markers):
+        return EXIT_PARSE
+    if any(marker in text for marker in auth_markers):
+        return EXIT_AUTH
+    if any(marker in text for marker in network_markers):
+        return EXIT_NETWORK
+    if any(marker in text for marker in validation_markers):
+        return EXIT_VALIDATION
+    if original_code in {EXIT_PARSE, EXIT_AUTH, EXIT_NETWORK, EXIT_VALIDATION, EXIT_RUNTIME}:
+        return int(original_code)
+    return EXIT_RUNTIME
+
+
+def _emit_json_error(message: str, *, original_exit_code: int | None = None) -> int:
+    normalized = _normalized_error_exit_code(message, original_code=original_exit_code)
+    payload: dict[str, Any] = {
+        "status": "error",
+        "error": str(message),
+        "exit_code": normalized,
+    }
+    hint = _error_hint_for_message(message)
+    if hint:
+        payload["hint"] = hint
+    _emit_json(payload)
+    return normalized
 
 
 def _is_local_host(host: str) -> bool:
@@ -137,10 +240,24 @@ def _load_json_file(path: Path) -> dict[str, Any]:
 
 
 def _resolve_config_path(args: argparse.Namespace) -> Path:
+    global _LEGACY_CONFIG_HINT_SHOWN
     raw = getattr(args, "config", None)
     if raw:
         return Path(raw).expanduser().resolve()
-    return (_find_workspace_root() / DEFAULT_CONFIG_FILE).resolve()
+    workspace = _find_workspace_root()
+    primary = (workspace / PRIMARY_CONFIG_FILE).resolve()
+    if primary.exists():
+        return primary
+    legacy = (workspace / LEGACY_CONFIG_FILE).resolve()
+    if legacy.exists():
+        if not _LEGACY_CONFIG_HINT_SHOWN and _OUTPUT_FORMAT != "json":
+            _ui().hint(
+                f"Using legacy config `{LEGACY_CONFIG_FILE}`. "
+                f"Run `comfysql config init --path ./{PRIMARY_CONFIG_FILE}` to migrate."
+            )
+            _LEGACY_CONFIG_HINT_SHOWN = True
+        return legacy
+    return primary
 
 
 def _parse_url(raw_url: str) -> tuple[str, str, int]:
@@ -220,8 +337,7 @@ def _build_connection_settings(args: argparse.Namespace) -> ConnectionSettings:
     if token:
         headers[header_name] = f"{auth_scheme} {token}".strip() if auth_scheme else token
 
-    # Remote-only agent mode: any host (including localhost) is treated as an external server.
-    remote = True
+    remote = host not in {"127.0.0.1", "localhost", "::1"}
     start_timeout = float(timeout_cfg["start_seconds"]) if "start_seconds" in timeout_cfg else None
     submit_timeout = float(timeout_cfg["submit_seconds"]) if "submit_seconds" in timeout_cfg else None
     return ConnectionSettings(
@@ -269,14 +385,6 @@ def _apply_connection_settings(args: argparse.Namespace) -> None:
         os.environ["COMFY_AUTH_HEADER_VALUE"] = auth_value
     if settings.remote:
         log(f"using remote server {_HTTP_SCHEME}://{settings.host}:{settings.port}")
-
-
-def _remote_stop_guard() -> None:
-    raise CliError(
-        "Stop/restart are not supported in remote-only mode. "
-        "Manage the server process outside comfy-agent.",
-        exit_code=6,
-    )
 
 
 def _build_default_config_payload() -> dict[str, Any]:
@@ -403,9 +511,11 @@ def get_comfy_data_dir() -> Path:
         candidates = [
             workspace.resolve(),
             (workspace / "comfy-custom").resolve(),
-            get_comfy_files_dir(),
+            (workspace / "comfyui-core").resolve(),
+            (workspace / "comfy-custom" / "comfyui-core").resolve(),
+            (workspace / "comfy_files").resolve(),
         ]
-        data_dir = next((p for p in candidates if _looks_like_comfy_data_dir(p)), get_comfy_files_dir())
+        data_dir = next((p for p in candidates if _looks_like_comfy_data_dir(p)), workspace.resolve())
 
     if not data_dir.exists():
         raise CliError(f"Comfy data directory not found: {data_dir}")
@@ -912,23 +1022,42 @@ def _split_sql_statements(text: str) -> list[str]:
     buf: list[str] = []
     quote: str | None = None
 
-    for ch in text:
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
         if quote is not None:
             buf.append(ch)
+            # Support backslash-escaped quote chars in SQL strings.
+            if ch == "\\" and i + 1 < n:
+                i += 1
+                buf.append(text[i])
+                i += 1
+                continue
+            # Support doubled quote escaping ('' / "").
+            if ch == quote and i + 1 < n and text[i + 1] == quote:
+                i += 1
+                buf.append(text[i])
+                i += 1
+                continue
             if ch == quote:
                 quote = None
+            i += 1
             continue
-        if ch in ("'", '"'):
+        if ch in ("'", "\""):
             quote = ch
             buf.append(ch)
+            i += 1
             continue
         if ch == ";":
             statement = "".join(buf).strip()
             if statement:
                 statements.append(statement + ";")
             buf = []
+            i += 1
             continue
         buf.append(ch)
+        i += 1
 
     tail = "".join(buf).strip()
     if tail:
@@ -1495,18 +1624,48 @@ def _render_sql_result_styled(result: dict[str, Any], table_filter: str, ui: Ter
 
 def _is_destructive_sql(sql_text: str) -> bool:
     text = sql_text.strip().rstrip(";").strip()
-    upper = text.upper()
-    if upper.startswith(("DROP ", "DELETE ", "TRUNCATE ", "ALTER ")):
-        return True
-    if upper.startswith("CREATE PRESET ") or upper.startswith("CREATE PROFILE "):
-        return True
-    return False
+    upper = " ".join(text.upper().split())
+    if not upper:
+        return False
+
+    mutating_prefixes = (
+        "DROP ",
+        "DELETE ",
+        "TRUNCATE ",
+        "ALTER ",
+        "CREATE TABLE ",
+        "CREATE TEMPLATE ",
+        "CREATE PRESET ",
+        "CREATE PROFILE ",
+        "CREATE CHARACTER ",
+        "CREATE OBJECT ",
+        "CREATE SLOT ",
+        "CREATE QUERY ",
+        "SET META FOR ",
+        "UNSET META FOR ",
+        "RUN QUERY ",
+    )
+    return upper.startswith(mutating_prefixes)
 
 
 def _confirm_sql_if_needed(sql_text: str, yes: bool) -> None:
     if yes or not _is_destructive_sql(sql_text):
         return
-    answer = input("This statement can change state. Continue? [y/N]: ").strip().lower()
+    try:
+        answer = input("This statement can change state. Continue? [y/N]: ").strip().lower()
+    except EOFError as exc:
+        raise CliError("Confirmation required for state-changing SQL in non-interactive mode. Re-run with -y.", exit_code=2) from exc
+    if answer not in {"y", "yes"}:
+        raise CliError("Cancelled by user.", exit_code=130)
+
+
+def _confirm_non_sql_mutation_if_needed(*, yes: bool, prompt: str) -> None:
+    if yes:
+        return
+    try:
+        answer = input(f"{prompt} Continue? [y/N]: ").strip().lower()
+    except EOFError as exc:
+        raise CliError("Confirmation required for mutating command in non-interactive mode. Re-run with --yes.", exit_code=2) from exc
     if answer not in {"y", "yes"}:
         raise CliError("Cancelled by user.", exit_code=130)
 
@@ -1515,6 +1674,7 @@ def _execute_sql_statement(engine: LocalComfySQLEngine, sql_text: str, args: arg
     report_spec = _parse_report_sql(sql_text)
     if report_spec is not None:
         inner_sql, report_path = report_spec
+        _confirm_sql_if_needed(sql_text=inner_sql, yes=bool(getattr(args, "yes", False)))
         _run_sql_report(
             engine=engine,
             sql_text=inner_sql,
@@ -1538,6 +1698,8 @@ def _execute_sql_statement(engine: LocalComfySQLEngine, sql_text: str, args: arg
         )
     except SQLEngineError as exc:
         raise CliError(str(exc), exit_code=exc.exit_code) from exc
+    except Exception as exc:
+        raise CliError(f"SQL execution failed unexpectedly: {exc}", exit_code=4) from exc
     _render_sql_result(result, table_filter=getattr(args, "show_tables", "all") or "all")
 
 
@@ -1787,14 +1949,23 @@ def cmd_start(args: argparse.Namespace) -> int:
     if not _has_synced_models(models_dir):
         _ui().warning(
             "no synced models found under models/. "
-            "Run `comfy-agent pull --yes` to sync defaults, or use your own model files."
+            "Run `comfysql pull --yes` to sync defaults, or use your own model files."
         )
     _ui().success(f"server_healthy host={args.host} port={args.port}")
     return 0
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
-    workflow_path = Path(args.workflow).expanduser().resolve()
+    server_or_workflow = str(getattr(args, "server_or_workflow", "") or "").strip()
+    workflow_arg = str(getattr(args, "workflow", "") or "").strip()
+    if workflow_arg:
+        args.server = server_or_workflow
+        workflow_value = workflow_arg
+    else:
+        workflow_value = server_or_workflow
+    if not workflow_value:
+        raise CliError("Missing workflow path. Usage: comfysql submit [server] <workflow.json>", exit_code=2)
+    workflow_path = Path(workflow_value).expanduser().resolve()
     _ui().section(f"submit workflow={workflow_path.name} server={args.host}:{args.port}")
     if not args.skip_validate:
         log("running preflight validation before submit")
@@ -1818,16 +1989,27 @@ def cmd_submit(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
+    server_or_workflow = str(getattr(args, "server_or_workflow", "") or "").strip()
+    workflow_arg = str(getattr(args, "workflow", "") or "").strip()
+    if workflow_arg:
+        args.server = server_or_workflow
+        workflow_value = workflow_arg
+    else:
+        workflow_value = server_or_workflow
+    if not workflow_value:
+        raise CliError("Missing workflow path. Usage: comfysql validate [server] <workflow.json>", exit_code=2)
     _ui().section(f"validate server={args.host}:{args.port}")
     return validate_workflow(
-        workflow_path=Path(args.workflow).expanduser().resolve(),
+        workflow_path=Path(workflow_value).expanduser().resolve(),
         host=args.host,
         port=args.port,
     )
 
 
 def cmd_sql(args: argparse.Namespace) -> int:
-    _ui().section(f"sql server={args.host}:{args.port}")
+    json_mode = _wants_json(args)
+    if not json_mode:
+        _ui().section(f"sql server={args.host}:{args.port}")
     engine = _build_sql_engine(args)
     if bool(getattr(args, "dry_run", False)):
         args.compile_only = True
@@ -1857,6 +2039,60 @@ def cmd_sql(args: argparse.Namespace) -> int:
     if not statements:
         raise CliError("No SQL statements found.", exit_code=2)
 
+    if json_mode:
+        rows: list[dict[str, Any]] = []
+        for index, statement in enumerate(statements, start=1):
+            report_spec = _parse_report_sql(statement)
+            if report_spec is not None:
+                inner_sql, report_path = report_spec
+                _confirm_sql_if_needed(sql_text=inner_sql, yes=bool(getattr(args, "yes", False)))
+                report_result, events = _capture_stdout_call(
+                    _run_sql_report,
+                    engine=engine,
+                    sql_text=inner_sql,
+                    args=args,
+                    report_path=Path(report_path).expanduser().resolve(),
+                    title=str(getattr(args, "title", "") or "SQL Run Report"),
+                    extra_images=[],
+                )
+                rows.append(
+                    {
+                        "statement_index": index,
+                        "statement": statement,
+                        "kind": "report",
+                        "report_path": str(Path(report_path).expanduser().resolve()),
+                        "result": report_result,
+                        "events": events,
+                    }
+                )
+                continue
+            _confirm_sql_if_needed(sql_text=statement, yes=bool(getattr(args, "yes", False)))
+            try:
+                result, events = _capture_stdout_call(
+                    engine.execute_sql,
+                    sql=statement,
+                    compile_only=args.compile_only,
+                    no_cache=args.no_cache,
+                    timeout=args.timeout,
+                    statement_index=index,
+                    download_output=bool(getattr(args, "download_output", False)),
+                    download_dir=getattr(args, "download_dir", None),
+                    upload_mode=str(getattr(args, "upload_mode", "strict")),
+                )
+            except SQLEngineError as exc:
+                raise CliError(str(exc), exit_code=exc.exit_code) from exc
+            rows.append(
+                {
+                    "statement_index": index,
+                    "statement": statement,
+                    "kind": "sql",
+                    "result": result,
+                    "events": events,
+                }
+            )
+        _emit_json({"status": "ok", "server": f"{args.host}:{args.port}", "statements": rows})
+        return 0
+
     for index, statement in enumerate(statements, start=1):
         _execute_sql_statement(
             engine=engine,
@@ -1879,11 +2115,46 @@ def _parse_report_sql(sql_text: str) -> tuple[str, str] | None:
     if not text:
         return None
     normalized = text.rstrip().rstrip(";").strip()
-    m = re.match(r"^REPORT\s+(.+)\s+TO\s+(.+)$", normalized, flags=re.IGNORECASE | re.DOTALL)
-    if not m:
+    if not normalized.lower().startswith("report "):
         return None
-    inner_sql = m.group(1).strip()
-    raw_path = m.group(2).strip()
+    body = normalized[7:].strip()
+    if not body:
+        return None
+
+    quote: str | None = None
+    to_positions: list[int] = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if quote is not None:
+            if ch == "\\" and i + 1 < len(body):
+                i += 2
+                continue
+            if ch == quote and i + 1 < len(body) and body[i + 1] == quote:
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", "\""):
+            quote = ch
+            i += 1
+            continue
+        if i + 1 < len(body) and body[i : i + 2].lower() == "to":
+            prev_ok = i == 0 or body[i - 1].isspace()
+            next_ok = i + 2 == len(body) or body[i + 2].isspace()
+            if prev_ok and next_ok:
+                to_positions.append(i)
+            i += 2
+            continue
+        i += 1
+
+    if not to_positions:
+        return None
+    to_index = to_positions[-1]
+    inner_sql = body[:to_index].strip()
+    raw_path = body[to_index + 2 :].strip()
     if (raw_path.startswith("'") and raw_path.endswith("'")) or (raw_path.startswith('"') and raw_path.endswith('"')):
         raw_path = raw_path[1:-1]
     if not inner_sql or not raw_path:
@@ -1990,7 +2261,9 @@ def _run_sql_report(
 def cmd_sql_report(args: argparse.Namespace) -> int:
     from comfy_custom.comfysql_runner.sql_parser import SelectQuery, parse_sql
 
-    _ui().section(f"sql-report server={args.host}:{args.port}")
+    json_mode = _wants_json(args)
+    if not json_mode:
+        _ui().section(f"sql-report server={args.host}:{args.port}")
     engine = _build_sql_engine(args)
     sql_raw = getattr(args, "sql", None)
     if sql_raw and args.sql_file:
@@ -2014,6 +2287,26 @@ def cmd_sql_report(args: argparse.Namespace) -> int:
     )
     title = str(getattr(args, "title", "") or "").strip() or "SQL Run Report"
     extra_images = [str(x) for x in (getattr(args, "image", None) or [])]
+    if json_mode:
+        rc, events = _capture_stdout_call(
+            _run_sql_report,
+            engine=engine,
+            sql_text=sql_text,
+            args=args,
+            report_path=report_path,
+            title=title,
+            extra_images=extra_images,
+        )
+        _emit_json(
+            {
+                "status": "ok" if int(rc) == 0 else "error",
+                "server": f"{args.host}:{args.port}",
+                "report_path": str(report_path),
+                "sql": sql_text,
+                "events": events,
+            }
+        )
+        return int(rc)
     return _run_sql_report(
         engine=engine,
         sql_text=sql_text,
@@ -2026,6 +2319,9 @@ def cmd_sql_report(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     healthy = is_server_healthy(args.host, args.port, timeout=1.5)
+    if _wants_json(args):
+        _emit_json({"status": "ok", "healthy": bool(healthy), "server": f"{args.host}:{args.port}"})
+        return 0
     if healthy:
         _ui().success(f"status=running_remote host={args.host} port={args.port}")
     else:
@@ -2035,7 +2331,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    _ui().section(f"doctor server={args.host}:{args.port}")
+    json_mode = _wants_json(args)
+    if not json_mode:
+        _ui().section(f"doctor server={args.host}:{args.port}")
     checks: list[tuple[str, bool, str]] = []
     base = f"{_HTTP_SCHEME}://{args.host}:{args.port}"
     timeout = float(getattr(args, "timeout", 5.0) or 5.0)
@@ -2083,51 +2381,78 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     auth_ok = bool(_REQUEST_HEADERS)
     checks.append(("auth_header", auth_ok, "configured" if auth_ok else "not_configured"))
 
+    if bool(getattr(args, "full", False)):
+        try:
+            config_path = _resolve_config_path(args)
+            checks.append(("config", config_path.exists(), f"path={config_path}"))
+        except Exception as exc:
+            checks.append(("config", False, str(exc)))
+        assets_dir = _default_assets_dir()
+        checks.append(("local_assets_dir", assets_dir.exists(), f"path={assets_dir}"))
+        try:
+            engine = _build_sql_engine(args)
+            engine.execute_sql(
+                sql="SHOW TABLES;",
+                compile_only=True,
+                no_cache=False,
+                timeout=max(timeout, 10.0),
+                statement_index=1,
+            )
+            checks.append(("sql_show_tables", True, "ok"))
+        except Exception as exc:
+            checks.append(("sql_show_tables", False, str(exc)))
+
     failed = 0
     for name, ok, detail in checks:
+        if not ok:
+            failed += 1
+        if json_mode:
+            continue
         status = "ok" if ok else "fail"
         if ok:
             _ui().success(f"doctor {name}={status} detail={detail}")
         else:
             _ui().error(f"doctor {name}={status} detail={detail}")
-        if not ok:
-            failed += 1
+
+    if json_mode:
+        _emit_json(
+            {
+                "status": "ok" if failed == 0 else "fail",
+                "server": f"{args.host}:{args.port}",
+                "checks": [
+                    {"name": name, "ok": bool(ok), "detail": detail}
+                    for name, ok, detail in checks
+                ],
+                "failed_checks": failed,
+            }
+        )
+        return 0 if failed == 0 else EXIT_NETWORK
 
     if failed:
         _ui().error(f"doctor_summary status=fail failed_checks={failed}")
         _ui().hint(f"Run `comfysql status {args.host}` after fixing connectivity/auth.")
-        return 3
+        return EXIT_NETWORK
     _ui().success("doctor_summary status=ok failed_checks=0")
     return 0
 
 
-def cmd_stop(args: argparse.Namespace) -> int:
-    state = read_state()
-    if state is None and not is_server_healthy(args.host, args.port, timeout=1.5):
-        print(f"server_not_running host={args.host} port={args.port}", flush=True)
-        return 0
-    _remote_stop_guard()
-    return 6
-
-
-def cmd_restart(args: argparse.Namespace) -> int:
-    _remote_stop_guard()
-    return 6
-
-
 def cmd_pull(args: argparse.Namespace) -> int:
     config_path = Path(getattr(args, "config", None) or (_find_workspace_root() / "hf_pull_config.json")).expanduser().resolve()
+    workspace = _find_workspace_root().resolve()
     try:
         models_base = get_comfy_data_dir()
     except CliError:
-        models_base = get_comfy_files_dir()
+        # Keep pull usable when comfy core is absent but data folders still exist/will be created.
+        models_base = workspace
+    models_dir = (models_base / "models").resolve()
+    models_dir.mkdir(parents=True, exist_ok=True)
     try:
         from comfy_custom.hf_pull import PullError, ensure_default_hf_pull_config
 
         ensure_default_hf_pull_config(config_path)
         report = execute_pull(
             config_path=config_path,
-            models_dir=models_base / "models",
+            models_dir=models_dir,
             state_dir=get_state_dir(),
             yes=bool(getattr(args, "yes", False)),
             dry_run=bool(getattr(args, "dry_run", False)),
@@ -2145,7 +2470,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
         f"copied={report.copied} skipped_exists={report.skipped_exists} failed={report.failed} "
         f"bytes_copied={report.bytes_copied} dry_run={'true' if report.dry_run else 'false'}",
     )
-    return 4 if report.failed else 0
+    return EXIT_RUNTIME if report.failed else 0
 
 
 def execute_pull(**kwargs):
@@ -2213,12 +2538,24 @@ def _collect_asset_files(*, source: str | None, all_assets: bool) -> list[Path]:
 
 def cmd_copy_assets(args: argparse.Namespace) -> int:
     files = _collect_asset_files(source=getattr(args, "source", None), all_assets=bool(getattr(args, "all", False)))
-    log(
-        f"copy_assets host={args.host}:{args.port} files={len(files)} "
-        f"dry_run={'true' if args.dry_run else 'false'} mode=http_upload"
-    )
+    json_mode = _wants_json(args)
+    if not json_mode:
+        log(
+            f"copy_assets host={args.host}:{args.port} files={len(files)} "
+            f"dry_run={'true' if args.dry_run else 'false'} mode=http_upload"
+        )
 
     if args.dry_run:
+        if json_mode:
+            _emit_json(
+                {
+                    "status": "ok",
+                    "server": f"{args.host}:{args.port}",
+                    "dry_run": True,
+                    "files": [str(f) for f in files],
+                }
+            )
+            return 0
         _ui().section(f"copy-assets dry-run server={args.host}:{args.port}")
         _ui().line(f"copy_assets_plan files={len(files)} mode=http_upload")
         for f in files:
@@ -2233,6 +2570,11 @@ def cmd_copy_assets(args: argparse.Namespace) -> int:
             "inputs": {"image": str(file_path)},
         }
 
+    _confirm_non_sql_mutation_if_needed(
+        yes=bool(getattr(args, "yes", False)),
+        prompt="This command uploads local assets to the target server.",
+    )
+
     try:
         _patched, report = engine._auto_upload_local_assets(prompt, timeout=float(getattr(args, "timeout", DEFAULT_SUBMIT_TIMEOUT)))
     except SQLEngineError as exc:
@@ -2241,6 +2583,18 @@ def cmd_copy_assets(args: argparse.Namespace) -> int:
     uploaded = int(report.get("uploaded_count", 0))
     skipped = int(report.get("skipped_existing_count", 0))
     failed = int(report.get("failed_count", 0))
+    if json_mode:
+        _emit_json(
+            {
+                "status": "ok" if failed == 0 else "fail",
+                "server": f"{args.host}:{args.port}",
+                "uploaded": uploaded,
+                "skipped_existing": skipped,
+                "failed": failed,
+                "failed_items": report.get("failed", []),
+            }
+        )
+        return 0 if failed == 0 else EXIT_RUNTIME
     if failed > 0:
         _ui().warning("copy-assets completed with failures")
     else:
@@ -2254,7 +2608,7 @@ def cmd_copy_assets(args: argparse.Namespace) -> int:
     if failed > 0:
         _ui().hint("Run `comfysql doctor <server>` and retry `comfysql copy-assets <server> --all`.")
     if failed > 0:
-        return 4
+        return EXIT_RUNTIME
     return 0
 
 
@@ -2273,6 +2627,11 @@ def cmd_bind_character(args: argparse.Namespace) -> int:
 
     if not workflow or not character or not image_raw:
         raise CliError("bind-character requires --workflow, --character, and --image.", exit_code=2)
+
+    _confirm_non_sql_mutation_if_needed(
+        yes=bool(getattr(args, "yes", False)),
+        prompt="This command updates character binding state.",
+    )
 
     mapped_image = image_raw
     upload_report: dict[str, Any] | None = None
@@ -2441,11 +2800,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog_name, description="Custom Comfy server CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    status_cmd = sub.add_parser("status", help="Show target server status (remote-only)")
+    status_cmd = sub.add_parser("status", help="Show target server status")
     status_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
     status_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
     status_cmd.add_argument("--host", default=DEFAULT_HOST)
     status_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
+    status_cmd.add_argument("--output", choices=["text", "json"], default="text")
     status_cmd.set_defaults(func=cmd_status)
 
     doctor_cmd = sub.add_parser("doctor", help="Run remote server connection diagnostics")
@@ -2454,26 +2814,9 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_cmd.add_argument("--host", default=DEFAULT_HOST)
     doctor_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
     doctor_cmd.add_argument("--timeout", type=float, default=5.0)
+    doctor_cmd.add_argument("--full", action="store_true", help="Run extended preflight checks.")
+    doctor_cmd.add_argument("--output", choices=["text", "json"], default="text")
     doctor_cmd.set_defaults(func=cmd_doctor)
-
-    stop_cmd = sub.add_parser("stop", help="Unsupported in remote-only mode")
-    stop_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
-    stop_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
-    stop_cmd.add_argument("--host", default=DEFAULT_HOST)
-    stop_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
-    stop_cmd.add_argument("--timeout", type=float, default=10.0, help="Graceful stop timeout in seconds")
-    stop_cmd.add_argument("--force", action="store_true", help="Send SIGKILL if graceful stop times out")
-    stop_cmd.set_defaults(func=cmd_stop)
-
-    restart_cmd = sub.add_parser("restart", help="Unsupported in remote-only mode")
-    restart_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
-    restart_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
-    restart_cmd.add_argument("--host", default=DEFAULT_HOST)
-    restart_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
-    restart_cmd.add_argument("--stop-timeout", type=float, default=10.0, help="Graceful stop timeout in seconds")
-    restart_cmd.add_argument("--start-timeout", type=float, default=DEFAULT_START_TIMEOUT)
-    restart_cmd.add_argument("--force", action="store_true", help="Send SIGKILL if graceful stop times out")
-    restart_cmd.set_defaults(func=cmd_restart)
 
     pull_cmd = sub.add_parser("pull", help="Pull models from Hugging Face using local config")
     pull_cmd.add_argument("--config", help=f"HF pull config JSON path (default: ./hf_pull_config.json)")
@@ -2490,6 +2833,8 @@ def build_parser() -> argparse.ArgumentParser:
     copy_assets_cmd.add_argument("--timeout", type=float, default=DEFAULT_SUBMIT_TIMEOUT)
     copy_assets_cmd.add_argument("--all", action="store_true", help="Copy all files from local ./input/assets")
     copy_assets_cmd.add_argument("--dry-run", action="store_true", help="Show files that would be uploaded")
+    copy_assets_cmd.add_argument("--yes", action="store_true", help="Skip mutation confirmation prompts.")
+    copy_assets_cmd.add_argument("--output", choices=["text", "json"], default="text")
     copy_assets_cmd.set_defaults(func=cmd_copy_assets)
 
     bind_character_cmd = sub.add_parser(
@@ -2514,6 +2859,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Attempt to auto-upload local image before binding preset value.",
     )
+    bind_character_cmd.add_argument("--yes", action="store_true", help="Skip mutation confirmation prompts.")
     bind_character_cmd.set_defaults(func=cmd_bind_character)
 
     sync_cmd = sub.add_parser("sync", help="Sync node schema and model inventory from server")
@@ -2523,6 +2869,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
     sync_cmd.add_argument("--start-timeout", type=float, default=DEFAULT_START_TIMEOUT)
     sync_cmd.add_argument("--timeout", type=float, default=DEFAULT_SUBMIT_TIMEOUT)
+    sync_cmd.add_argument("--yes", action="store_true", help="Reserved for automation compatibility.")
     sync_cmd.set_defaults(func=cmd_sync)
 
     download_cmd = sub.add_parser("download", help="Download a file from Comfy endpoint URL (for example /view?...).")
@@ -2536,21 +2883,30 @@ def build_parser() -> argparse.ArgumentParser:
     download_cmd.set_defaults(func=cmd_download)
 
     submit_cmd = sub.add_parser("submit", help="Submit workflow JSON")
-    submit_cmd.add_argument("workflow", help="Path to API prompt workflow JSON")
+    submit_cmd.add_argument(
+        "server_or_workflow",
+        help="Workflow path, or server alias when passing a second workflow argument.",
+    )
+    submit_cmd.add_argument("workflow", nargs="?", help="Path to API prompt workflow JSON")
     submit_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
     submit_cmd.add_argument("--host", default=DEFAULT_HOST)
     submit_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
     submit_cmd.add_argument("--timeout", type=float, default=DEFAULT_SUBMIT_TIMEOUT)
     submit_cmd.add_argument("--no-cache", action="store_true", help="Force a fresh run by randomizing seed inputs")
     submit_cmd.add_argument("--skip-validate", action="store_true", help="Skip preflight validate+sync before submit")
-    submit_cmd.set_defaults(func=cmd_submit)
+    submit_cmd.add_argument("--yes", action="store_true", help="Reserved for automation compatibility.")
+    submit_cmd.set_defaults(func=cmd_submit, server="")
 
     validate_cmd = sub.add_parser("validate", help="Validate workflow JSON using local validator policies")
-    validate_cmd.add_argument("workflow", help="Path to workflow JSON (API prompt or UI workflow)")
+    validate_cmd.add_argument(
+        "server_or_workflow",
+        help="Workflow path, or server alias when passing a second workflow argument.",
+    )
+    validate_cmd.add_argument("workflow", nargs="?", help="Path to workflow JSON (API prompt or UI workflow)")
     validate_cmd.add_argument("--config", help=f"Config file path (default: ./{DEFAULT_CONFIG_FILE})")
     validate_cmd.add_argument("--host", default=DEFAULT_HOST)
     validate_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
-    validate_cmd.set_defaults(func=cmd_validate)
+    validate_cmd.set_defaults(func=cmd_validate, server="")
 
     sql_cmd = sub.add_parser("sql", help="Run ComfySQL (dynamic nodes + workflow tables)")
     sql_cmd.add_argument("server", nargs="?", help="Server alias from config (for example: localhost, remote)")
@@ -2569,6 +2925,7 @@ def build_parser() -> argparse.ArgumentParser:
     sql_cmd.add_argument("--timeout", type=float, default=DEFAULT_SUBMIT_TIMEOUT)
     sql_cmd.add_argument("--no-cache", action="store_true", help="Force a fresh run by randomizing seed inputs")
     sql_cmd.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts for destructive SQL")
+    sql_cmd.add_argument("--output", choices=["text", "json"], default="text")
     sql_cmd.add_argument(
         "--upload-mode",
         choices=["strict", "warn", "off"],
@@ -2602,18 +2959,21 @@ def build_parser() -> argparse.ArgumentParser:
     sql_report_cmd.add_argument("--no-cache", action="store_true")
     sql_report_cmd.add_argument("--compile-only", action="store_true")
     sql_report_cmd.add_argument("--upload-mode", choices=["strict", "warn", "off"], default="strict")
-    sql_report_cmd.add_argument("--download-output", action="store_true", default=True)
+    sql_report_cmd.add_argument("--download-output", dest="download_output", action="store_true", default=True)
+    sql_report_cmd.add_argument("--no-download-output", dest="download_output", action="store_false")
     sql_report_cmd.add_argument("--download-dir", help="Local folder to save downloaded outputs (default: ./output).")
     sql_report_cmd.add_argument("--report", help="Output markdown path (default: ./reports/sql_run_<timestamp>.md)")
     sql_report_cmd.add_argument("--title", help="Optional markdown report title")
     sql_report_cmd.add_argument("--image", action="append", help="Extra image path(s) to embed in the report")
+    sql_report_cmd.add_argument("--output", choices=["text", "json"], default="text")
     sql_report_cmd.set_defaults(func=cmd_sql_report)
 
-    config_cmd = sub.add_parser("config", help="Manage comfy-agent config")
+    config_cmd = sub.add_parser("config", help="Manage comfysql config")
     config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
     config_init = config_sub.add_parser("init", help="Write a starter config file")
     config_init.add_argument("--path", help=f"Output path (default: ./{DEFAULT_CONFIG_FILE})")
     config_init.add_argument("--force", action="store_true", help="Overwrite if file exists")
+    config_init.add_argument("--yes", action="store_true", help="Reserved for automation compatibility.")
     config_init.set_defaults(func=cmd_config_init)
 
     return parser
@@ -2622,13 +2982,28 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    _set_output_mode(args)
+    if getattr(args, "command", None) in {"submit", "validate"}:
+        server_or_workflow = str(getattr(args, "server_or_workflow", "") or "").strip()
+        workflow_arg = str(getattr(args, "workflow", "") or "").strip()
+        if workflow_arg and server_or_workflow:
+            args.server = server_or_workflow
     if getattr(args, "command", None) not in {"config", "pull"}:
         _apply_connection_settings(args)
     try:
         return int(args.func(args))
     except CliError as exc:
-        _print_error_with_hint(str(exc), to_stderr=True)
-        return exc.exit_code
+        message = str(exc)
+        if _OUTPUT_FORMAT == "json":
+            return _emit_json_error(message, original_exit_code=exc.exit_code)
+        _print_error_with_hint(message, to_stderr=True)
+        return _normalized_error_exit_code(message, original_code=exc.exit_code)
+    except Exception as exc:
+        message = f"Unexpected CLI error: {exc}"
+        if _OUTPUT_FORMAT == "json":
+            return _emit_json_error(message, original_exit_code=EXIT_RUNTIME)
+        _print_error_with_hint(message, to_stderr=True)
+        return EXIT_RUNTIME
     except KeyboardInterrupt:
         # Respect Ctrl-C for foreground command control.
         if signal.getsignal(signal.SIGINT) is not None:

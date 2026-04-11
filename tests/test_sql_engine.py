@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib import error
 
 import pytest
 
+import comfy_custom.sql_engine as sql_engine_module
 from comfy_custom.sql_engine import (
     CharacterBindingRegistry,
     LocalComfySQLEngine,
@@ -356,6 +358,102 @@ def test_sql_parser_supports_character_and_object_commands(tmp_path: Path) -> No
     assert create_slot.binding_key == "198.image"
 
 
+def test_binding_alias_generation_for_core_nodes(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    prompt = {
+        "1": {"class_type": "LoadImage", "inputs": {"image": "a.png"}},
+        "2": {"class_type": "LoadImage", "inputs": {"image": "b.png"}},
+        "3": {"class_type": "LoadImage", "inputs": {"image": "c.png"}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": "p1"}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"text": "p2"}},
+        "6": {"class_type": "KSampler", "inputs": {"seed": 1, "steps": 20, "cfg": 7}},
+        "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": "x"}},
+        "8": {"class_type": "EmptySD3LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+    }
+    aliases = engine._generate_binding_alias_specs(workflow_table="wf_demo", prompt=prompt)
+    names = [a.alias for a in aliases]
+    assert "subject_image" in names
+    assert "reference_image" in names
+    assert "reference_image_2" in names
+    assert "prompt" in names
+    assert "negative_prompt" in names
+    assert "seed" in names
+    assert "steps" in names
+    assert "cfg" in names
+    assert "filename_prefix" in names
+    assert "width" in names
+    assert "height" in names
+    assert "batch_size" in names
+
+
+def test_compile_workflow_table_supports_friendly_alias_where(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_alias.json"
+    wf.write_text(
+        json.dumps(
+            {
+                "198": {"class_type": "LoadImage", "inputs": {"image": "orig.png"}},
+                "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "old prompt"}},
+                "8": {"class_type": "CLIPTextEncode", "inputs": {"text": "old neg"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    spec = engine.registry.create_table("wf_alias", wf)
+    patched = engine._compile_workflow_table_with_alias(
+        table_spec=spec,
+        where={"subject_image": "new.png", "prompt": "new prompt", "negative_prompt": "new neg"},
+        source_alias=None,
+    )
+    assert patched["198"]["inputs"]["image"] == "new.png"
+    assert patched["6"]["inputs"]["text"] == "new prompt"
+    assert patched["8"]["inputs"]["text"] == "new neg"
+
+
+def test_create_slot_resolves_alias_to_canonical_raw_key(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_slot.json"
+    wf.write_text(
+        json.dumps({"198": {"class_type": "LoadImage", "inputs": {"image": "orig.png"}}}),
+        encoding="utf-8",
+    )
+    engine.registry.create_table("wf_slot", wf)
+    result = engine.execute_sql(
+        "CREATE SLOT subject FOR wf_slot AS CHARACTER BINDING subject_image;",
+        compile_only=True,
+        no_cache=False,
+        timeout=5.0,
+        statement_index=1,
+    )
+    assert result["action"] == "create_slot"
+    assert result["binding_key"] == "198.image"
+
+
+def test_describe_workflow_includes_alias_rows(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_describe_alias.json"
+    wf.write_text(
+        json.dumps(
+            {
+                "198": {"class_type": "LoadImage", "inputs": {"image": "orig.png"}},
+                "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "old prompt"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    engine.registry.create_table("wf_describe_alias", wf)
+    result = engine.execute_sql(
+        "DESCRIBE WORKFLOW wf_describe_alias;",
+        compile_only=True,
+        no_cache=False,
+        timeout=5.0,
+        statement_index=1,
+    )
+    bindable = result.get("bindable_fields")
+    assert isinstance(bindable, list)
+    assert any(isinstance(row, dict) and row.get("alias") == "subject_image" and row.get("raw_key") == "198.image" for row in bindable)
+
+
 def test_sql_parser_supports_preset_commands(tmp_path: Path) -> None:
     from comfy_custom.comfysql_runner.sql_parser import parse_sql
 
@@ -384,6 +482,14 @@ def test_sql_parser_supports_preset_commands(tmp_path: Path) -> None:
 
     drop_wf = parse_sql("DROP TABLE wf_demo;")
     assert drop_wf.table_name == "wf_demo"
+
+
+def test_sql_parser_describe_workflow_specific_form(tmp_path: Path) -> None:
+    from comfy_custom.comfysql_runner.sql_parser import parse_sql
+
+    q = parse_sql("DESCRIBE WORKFLOW wf_demo;")
+    assert q.__class__.__name__ == "DescribeQuery"
+    assert q.target == "wf_demo"
 
 
 def test_create_table_runs_validation_before_register(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -417,7 +523,10 @@ def test_create_table_runs_validation_before_register(monkeypatch: pytest.Monkey
     )
     assert result["action"] == "create_table"
     assert called["count"] == 1
-    assert engine.registry.get("demo") is not None
+    stored = engine.registry.get("demo")
+    assert stored is not None
+    assert "/.state/workflows/" in Path(stored.workflow_path).as_posix()
+    assert Path(stored.workflow_path).exists()
 
 
 def test_create_table_runs_asset_upload_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -487,6 +596,51 @@ def test_create_table_strict_upload_failure_blocks_register(monkeypatch: pytest.
         )
 
     assert engine.registry.get("demo_upload_fail") is None
+
+
+def test_drop_table_cleans_related_slots_presets_and_legacy_bindings(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    wf = tmp_path / "wf_drop_cleanup.json"
+    wf.write_text(json.dumps({"198": {"class_type": "LoadImage", "inputs": {"image": "x.png"}}}), encoding="utf-8")
+    engine.registry.create_table("wf_drop_cleanup", wf)
+    engine.preset_registry.upsert("wf_drop_cleanup", "default_run", {"seed": 1})
+    engine.workflow_slot_registry.upsert(
+        workflow_table="wf_drop_cleanup",
+        slot_name="subject",
+        slot_kind="character",
+        binding_key="198.image",
+    )
+    engine.character_binding_registry.upsert(
+        workflow_table="wf_drop_cleanup",
+        character_name="char_x",
+        binding_key="198.image",
+        binding_value="x.png",
+    )
+
+    result = engine.execute_sql(
+        "DROP TABLE wf_drop_cleanup;",
+        compile_only=True,
+        no_cache=False,
+        timeout=5.0,
+        statement_index=1,
+    )
+    assert result["action"] == "drop_table"
+    assert engine.registry.get("wf_drop_cleanup") is None
+    assert engine.preset_registry.get("wf_drop_cleanup", "default_run") is None
+    assert engine.workflow_slot_registry.list_for_workflow_kind(workflow_table="wf_drop_cleanup", slot_kind="character") == []
+    assert engine.character_binding_registry.list_for(workflow_table="wf_drop_cleanup", character_name="char_x") == []
+
+
+def test_describe_unknown_target_returns_sql_engine_error(tmp_path: Path) -> None:
+    engine = _make_engine(tmp_path)
+    with pytest.raises(SQLEngineError, match="Unknown table/node"):
+        engine.execute_sql(
+            "DESCRIBE totally_unknown_target;",
+            compile_only=True,
+            no_cache=False,
+            timeout=5.0,
+            statement_index=1,
+        )
 
 
 def test_create_template_captures_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1094,6 +1248,73 @@ def test_extract_saveimage_prefixes_and_download_by_prefix(tmp_path: Path) -> No
     assert len(report["downloaded"]) == 1
     assert Path(report["downloaded"][0]).exists()
     assert report["failed"] == []
+
+
+def test_list_models_inventory_falls_back_to_object_info_on_auth_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _make_engine(tmp_path)
+
+    class _Resp:
+        def __init__(self, payload: object) -> None:
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+    def _fake_open(url: str, **kwargs):
+        if url.endswith("/models"):
+            raise error.HTTPError(url=url, code=401, msg="Unauthorized", hdrs=None, fp=None)
+        if url.endswith("/object_info"):
+            return _Resp(
+                {
+                    "CheckpointLoaderSimple": {
+                        "input": {"required": {"ckpt_name": [["model-a.safetensors", "model-b.safetensors"]]}}
+                    }
+                }
+            )
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr(sql_engine_module, "urlopen_with_auth_fallback", _fake_open)
+    rows = engine._list_models_inventory()
+    names = {row["name"] for row in rows}
+    assert "model-a.safetensors" in names
+    assert "model-b.safetensors" in names
+
+
+def test_list_models_inventory_skips_restricted_category(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _make_engine(tmp_path)
+
+    class _Resp:
+        def __init__(self, payload: object) -> None:
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+    def _fake_open(url: str, **kwargs):
+        if url.endswith("/models"):
+            return _Resp(["checkpoints", "restricted"])
+        if url.endswith("/models/checkpoints"):
+            return _Resp(["foo.safetensors"])
+        if url.endswith("/models/restricted"):
+            raise error.HTTPError(url=url, code=401, msg="Unauthorized", hdrs=None, fp=None)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr(sql_engine_module, "urlopen_with_auth_fallback", _fake_open)
+    rows = engine._list_models_inventory()
+    assert any(row["name"] == "foo.safetensors" for row in rows)
+    assert all(row["category"] != "restricted" for row in rows)
 
 
 def test_normalize_asset_binding_preserves_non_assets_prefix(tmp_path: Path) -> None:

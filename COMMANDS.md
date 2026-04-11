@@ -7,6 +7,18 @@ Output behavior:
 - Interactive terminal: clean colorized status/success/warning/error lines.
 - Non-interactive runs: plain text output (no forced ANSI escape codes).
 - Known failures include a concise `hint:` line with a concrete next command.
+- Automation mode: `--output json` on `status`, `doctor`, `sql`, `sql-report`, `copy-assets`.
+- Extended preflight: `comfysql doctor <server> --full`.
+
+Exit code contract:
+
+- `0` success
+- `2` parse/usage/config input errors
+- `3` auth errors
+- `4` network/connectivity errors
+- `5` validation errors
+- `6` runtime/internal execution errors
+- `130` cancelled/interrupted
 
 ## Top-Level Commands
 
@@ -24,8 +36,6 @@ Available commands:
 
 - `status`
 - `doctor`
-- `stop`
-- `restart`
 - `pull`
 - `copy-assets`
 - `bind-character`
@@ -42,15 +52,15 @@ Available commands:
 ## Health / Connectivity
 
 ```bash
-comfysql status [server] [--config <path>] [--host <host>] [--port <port>]
-comfysql doctor [server] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+comfysql status [server] [--config <path>] [--host <host>] [--port <port>] [--output {text,json}]
+comfysql doctor [server] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>] [--full] [--output {text,json}]
 comfysql sync [server] [--config <path>] [--host <host>] [--port <port>] [--start-timeout <seconds>] [--timeout <seconds>]
 ```
 
 ## Asset Operations
 
 ```bash
-comfysql copy-assets [server] [source] [--all] [--dry-run] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+comfysql copy-assets [server] [source] [--all] [--dry-run] [--yes] [--output {text,json}] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
 ```
 
 Notes:
@@ -70,7 +80,7 @@ comfysql copy-assets remote input/assets/bets.png
 ## Workflow Binding Compatibility Command
 
 ```bash
-comfysql bind-character [server] --workflow <workflow_table> --character <alias> --image <file> [--binding <node.input>] [--upload] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+comfysql bind-character [server] --workflow <workflow_table> --character <alias> --image <file> [--binding <node.input>] [--upload] [--yes] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
 ```
 
 Note:
@@ -87,8 +97,8 @@ comfysql pull [--config <hf_pull_config.json>] [--yes] [--dry-run]
 ## Validate / Submit
 
 ```bash
-comfysql validate [--config <path>] [--host <host>] [--port <port>] <workflow>
-comfysql submit [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>] [--no-cache] [--skip-validate] <workflow>
+comfysql validate [server] [--config <path>] [--host <host>] [--port <port>] <workflow>
+comfysql submit [server] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>] [--no-cache] [--skip-validate] <workflow>
 ```
 
 ## Download by URL
@@ -101,7 +111,7 @@ comfysql download [server] --url <absolute-url-or-/view?...> [--output <local-fi
 
 ```bash
 comfysql sql [server] [--config <path>]
-comfysql sql [server] --sql "<statement>;"
+comfysql sql [server] --sql "<statement>;" [--output {text,json}]
 comfysql sql [server] --sql-file <file.sql>
 ```
 
@@ -121,7 +131,7 @@ SQL runner flags:
 ## SQL Report Command
 
 ```bash
-comfysql sql-report [server] --sql "<single-statement>;" [--report <path.md>] [--title <title>] [--image <path>] [--download-output] [--download-dir <path>] [--upload-mode {strict,warn,off}] [--compile-only] [--no-cache] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
+comfysql sql-report [server] --sql "<single-statement>;" [--report <path.md>] [--title <title>] [--image <path>] [--download-output] [--download-dir <path>] [--upload-mode {strict,warn,off}] [--compile-only] [--no-cache] [--output {text,json}] [--config <path>] [--host <host>] [--port <port>] [--timeout <seconds>]
 comfysql sql-report [server] --sql-file <file.sql> [same-flags...]
 ```
 

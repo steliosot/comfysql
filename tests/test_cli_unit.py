@@ -41,13 +41,36 @@ def test_build_connection_settings_resolves_host_alias_from_config(tmp_path: Pat
             "remote": {"url": "http://34.132.147.127:80"},
         },
     }
-    (tmp_path / "comfy-agent.json").write_text(json.dumps(cfg), encoding="utf-8")
+    (tmp_path / "comfysql.json").write_text(json.dumps(cfg), encoding="utf-8")
     args = argparse.Namespace(server="", host="remote", port=8188, config=None)
 
     settings = cli._build_connection_settings(args)
     assert settings.host == "34.132.147.127"
     assert settings.port == 80
     assert settings.scheme == "http"
+
+
+def test_resolve_config_path_prefers_comfysql_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_workspace(tmp_path)
+    primary = tmp_path / "comfysql.json"
+    legacy = tmp_path / "comfy-agent.json"
+    primary.write_text("{}", encoding="utf-8")
+    legacy.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda: tmp_path)
+    args = argparse.Namespace(config=None)
+    path = cli._resolve_config_path(args)
+    assert path == primary.resolve()
+
+
+def test_resolve_config_path_falls_back_to_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_workspace(tmp_path)
+    legacy = tmp_path / "comfy-agent.json"
+    legacy.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_LEGACY_CONFIG_HINT_SHOWN", False)
+    args = argparse.Namespace(config=None)
+    path = cli._resolve_config_path(args)
+    assert path == legacy.resolve()
 
 
 def test_ensure_server_running_starts_when_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,14 +124,58 @@ def test_cmd_status_stopped(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     assert "status=stopped" in out
 
 
-def test_cmd_stop_not_running(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    monkeypatch.setattr(cli, "read_state", lambda: None)
-    monkeypatch.setattr(cli, "is_server_healthy", lambda host, port, timeout=1.5: False)
-    args = type("Args", (), {"host": "127.0.0.1", "port": 8188, "timeout": 1.0, "force": False})()
-    rc = cli.cmd_stop(args)
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "server_not_running" in out
+def test_parser_does_not_include_stop_restart() -> None:
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["stop"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["restart"])
+
+
+def test_confirm_sql_if_needed_handles_non_interactive_eof(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("builtins.input", lambda _prompt: (_ for _ in ()).throw(EOFError()))
+    with pytest.raises(cli.CliError, match="Re-run with -y"):
+        cli._confirm_sql_if_needed("DROP TABLE demo;", yes=False)
+
+
+def test_is_destructive_sql_detects_core_mutating_forms() -> None:
+    assert cli._is_destructive_sql("CREATE TABLE demo AS WORKFLOW '/tmp/x.json';") is True
+    assert cli._is_destructive_sql("CREATE CHARACTER char_matt WITH image='matt.png';") is True
+    assert cli._is_destructive_sql("CREATE SLOT subject FOR wf AS CHARACTER BINDING input_image;") is True
+    assert cli._is_destructive_sql("SET META FOR demo AS '{\"intent\":\"image_generation\"}';") is True
+    assert cli._is_destructive_sql("UNSET META FOR demo;") is True
+    assert cli._is_destructive_sql("RUN QUERY quick;") is True
+    assert cli._is_destructive_sql("SELECT image FROM txt2img_empty_latent WHERE seed=1;") is False
+
+
+def test_execute_sql_statement_confirms_report_inner_sql(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_confirm(*, sql_text: str, yes: bool) -> None:
+        seen["sql_text"] = sql_text
+        seen["yes"] = yes
+
+    def _fake_report(**kwargs):
+        seen["report_sql"] = kwargs["sql_text"]
+        return 0
+
+    monkeypatch.setattr(cli, "_confirm_sql_if_needed", _fake_confirm)
+    monkeypatch.setattr(cli, "_run_sql_report", _fake_report)
+    args = type("Args", (), {"title": "", "yes": False})()
+    cli._execute_sql_statement(
+        engine=object(),  # type: ignore[arg-type]
+        sql_text=f"REPORT CREATE PROFILE p1 WITH width=512 TO '{tmp_path / 'r.md'}';",
+        args=args,
+        statement_index=1,
+    )
+    assert str(seen.get("sql_text", "")).startswith("CREATE PROFILE")
+    assert str(seen.get("report_sql", "")).startswith("CREATE PROFILE")
+
+
+def test_error_hint_for_non_interactive_confirmation() -> None:
+    hint = cli._error_hint_for_message("Confirmation required for state-changing SQL in non-interactive mode.")
+    assert hint is not None
+    assert "-y" in hint
 
 
 def test_resolve_download_url_supports_relative_view_path() -> None:
@@ -181,6 +248,7 @@ def test_cmd_bind_character_upserts_binding(monkeypatch: pytest.MonkeyPatch, cap
         binding="input_image",
         upload=False,
         timeout=10.0,
+        yes=True,
     )
     rc = cli.cmd_bind_character(args)
     assert rc == 0
@@ -217,6 +285,7 @@ def test_cmd_bind_character_upserts_with_upload(monkeypatch: pytest.MonkeyPatch,
         binding="input_image",
         upload=True,
         timeout=10.0,
+        yes=True,
     )
     rc = cli.cmd_bind_character(args)
     assert rc == 0
@@ -335,6 +404,13 @@ def test_split_sql_statements_handles_multiple() -> None:
     assert "prompt='a'" in statements[0]
 
 
+def test_split_sql_statements_handles_escaped_quotes() -> None:
+    sql = "SELECT image FROM txt2img_empty_latent WHERE prompt='it''s TO good'; SELECT image FROM txt2img_empty_latent WHERE seed=2;"
+    statements = cli._split_sql_statements(sql)
+    assert len(statements) == 2
+    assert "it''s TO good" in statements[0]
+
+
 def test_is_complete_sql_statement_supports_optional_semicolon() -> None:
     assert cli._is_complete_sql_statement("SHOW TABLES") is True
     assert cli._is_complete_sql_statement("SHOW TABLES;") is True
@@ -371,6 +447,42 @@ def test_parse_report_sql_supports_optional_semicolon() -> None:
     inner_sql2, report_path2 = parsed2
     assert "USING char_nick" in inner_sql2
     assert report_path2 == "./examples/out2.md"
+
+
+def test_parse_report_sql_handles_to_inside_string_literal() -> None:
+    parsed = cli._parse_report_sql(
+        "REPORT SELECT image FROM txt2img_empty_latent "
+        "WHERE prompt='go TO London at sunset' AND seed=42 TO './examples/to_test.md';"
+    )
+    assert parsed is not None
+    inner_sql, report_path = parsed
+    assert "go TO London" in inner_sql
+    assert report_path == "./examples/to_test.md"
+
+
+def test_main_json_error_envelope_and_normalized_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _boom(_args):
+        raise cli.CliError("Validation failed fetching node catalog: timeout", exit_code=3)
+
+    monkeypatch.setattr(cli, "cmd_doctor", _boom)
+    parser = cli.build_parser()
+    monkeypatch.setattr(cli, "build_parser", lambda: parser)
+    monkeypatch.setattr(cli, "_apply_connection_settings", lambda _args: None)
+    rc = cli.main(["doctor", "--output", "json"])
+    assert rc == cli.EXIT_VALIDATION
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["status"] == "error"
+    assert payload["exit_code"] == cli.EXIT_VALIDATION
+
+
+def test_parser_doctor_full_and_output_flags() -> None:
+    parser = cli.build_parser()
+    args = parser.parse_args(["doctor", "--full", "--output", "json"])
+    assert args.full is True
+    assert args.output == "json"
 
 
 def test_execute_sql_statement_routes_report_sql(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -542,7 +654,7 @@ def test_cmd_pull_success(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
         bytes_copied = 100
         dry_run = False
 
-    monkeypatch.setattr(cli, "get_comfy_files_dir", lambda: Path("/tmp/comfy"))
+    monkeypatch.setattr(cli, "get_comfy_data_dir", lambda: Path("/tmp/comfy"))
     monkeypatch.setattr(cli, "get_state_dir", lambda: Path("/tmp/state"))
     monkeypatch.setattr(cli, "execute_pull", lambda **kwargs: _Report())
     args = type(
@@ -561,6 +673,60 @@ def test_cmd_pull_success(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     assert rc == 0
     out = capsys.readouterr().out
     assert "pull_done" in out
+
+
+def test_cmd_pull_falls_back_to_workspace_when_data_dir_invalid(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class _Report:
+        copied = 0
+        skipped_exists = 0
+        failed = 0
+        bytes_copied = 0
+        dry_run = True
+
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "get_comfy_data_dir", lambda: (_ for _ in ()).throw(cli.CliError("bad")))
+    monkeypatch.setattr(cli, "get_state_dir", lambda: tmp_path / ".state")
+    seen: dict[str, Path] = {}
+
+    def _fake_execute_pull(**kwargs):
+        seen["models_dir"] = kwargs["models_dir"]
+        return _Report()
+
+    monkeypatch.setattr(cli, "execute_pull", _fake_execute_pull)
+    args = type("Args", (), {"config": None, "yes": True, "dry_run": True})()
+    rc = cli.cmd_pull(args)
+    assert rc == 0
+    assert seen["models_dir"] == (tmp_path / "models").resolve()
+
+
+def test_build_parser_submit_validate_support_server_then_workflow() -> None:
+    parser = cli.build_parser()
+    submit_args = parser.parse_args(["submit", "remote", "wf.json"])
+    assert submit_args.command == "submit"
+    assert submit_args.server_or_workflow == "remote"
+    assert submit_args.workflow == "wf.json"
+
+    validate_args = parser.parse_args(["validate", "remote", "wf.json"])
+    assert validate_args.command == "validate"
+    assert validate_args.server_or_workflow == "remote"
+    assert validate_args.workflow == "wf.json"
+
+
+def test_build_parser_submit_validate_support_workflow_only() -> None:
+    parser = cli.build_parser()
+    submit_args = parser.parse_args(["submit", "wf.json"])
+    assert submit_args.server_or_workflow == "wf.json"
+    assert submit_args.workflow is None
+
+    validate_args = parser.parse_args(["validate", "wf.json"])
+    assert validate_args.server_or_workflow == "wf.json"
+    assert validate_args.workflow is None
+
+
+def test_build_parser_sql_report_supports_no_download_output_flag() -> None:
+    parser = cli.build_parser()
+    args = parser.parse_args(["sql-report", "--sql", "SHOW TABLES;", "--no-download-output"])
+    assert args.download_output is False
 
 
 def test_cmd_start_warns_when_no_models(monkeypatch: pytest.MonkeyPatch, capsys) -> None:

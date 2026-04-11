@@ -4,6 +4,7 @@ import copy
 import json
 import mimetypes
 import os
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,6 +75,19 @@ class WorkflowSlotSpec:
     slot_name: str
     slot_kind: str
     binding_key: str
+    created_at: float
+    updated_at: float
+
+
+@dataclass
+class WorkflowBindingAliasSpec:
+    workflow_table: str
+    alias: str
+    raw_key: str
+    class_type: str
+    input_name: str
+    is_primary: bool
+    generated: bool
     created_at: float
     updated_at: float
 
@@ -337,6 +351,16 @@ class PresetRegistry:
         self.load()
         return sorted(self._presets.values(), key=lambda s: (s.template_name.lower(), s.preset_name.lower()))
 
+    def delete_for_template(self, template_name: str) -> int:
+        self.load()
+        key = template_name.lower()
+        to_delete = [k for k in self._presets.keys() if k[0] == key]
+        for item in to_delete:
+            del self._presets[item]
+        if to_delete:
+            self.save()
+        return len(to_delete)
+
 
 class ProfileRegistry:
     def __init__(self, registry_path: Path) -> None:
@@ -553,6 +577,16 @@ class CharacterBindingRegistry:
         ch = character_name.lower()
         return any(c == ch for (_w, c, _k) in self._bindings.keys())
 
+    def delete_for_workflow(self, workflow_table: str) -> int:
+        self.load()
+        wf = workflow_table.lower()
+        to_delete = [k for k in self._bindings.keys() if k[0] == wf]
+        for item in to_delete:
+            del self._bindings[item]
+        if to_delete:
+            self.save()
+        return len(to_delete)
+
 
 class AssetAliasRegistry:
     def __init__(self, registry_path: Path) -> None:
@@ -734,6 +768,122 @@ class WorkflowSlotRegistry:
         out = [spec for (w, _s), spec in self._slots.items() if w == wf and spec.slot_kind == slot_kind]
         return sorted(out, key=lambda s: s.slot_name.lower())
 
+    def delete_for_workflow(self, workflow_table: str) -> int:
+        self.load()
+        wf = workflow_table.lower()
+        to_delete = [k for k in self._slots.keys() if k[0] == wf]
+        for item in to_delete:
+            del self._slots[item]
+        if to_delete:
+            self.save()
+        return len(to_delete)
+
+
+class WorkflowBindingAliasRegistry:
+    def __init__(self, registry_path: Path) -> None:
+        self.registry_path = registry_path
+        self._aliases: dict[tuple[str, str], WorkflowBindingAliasSpec] = {}
+        self._loaded = False
+
+    def load(self) -> None:
+        if self._loaded:
+            return
+        if not self.registry_path.exists():
+            self._loaded = True
+            return
+        try:
+            data = json.loads(self.registry_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise SQLEngineError(f"Failed to read SQL binding alias registry: {exc}", exit_code=3) from exc
+        if not isinstance(data, dict):
+            raise SQLEngineError(
+                f"Invalid SQL binding alias registry payload (expected object): {self.registry_path}",
+                exit_code=3,
+            )
+        version = int(data.get("version", 1))
+        if version > REGISTRY_SCHEMA_VERSION:
+            raise SQLEngineError(
+                f"SQL binding alias registry version {version} is newer than supported {REGISTRY_SCHEMA_VERSION}.",
+                exit_code=3,
+            )
+        for row in data.get("aliases", []):
+            if not isinstance(row, dict):
+                continue
+            workflow_table = str(row.get("workflow_table", "")).strip()
+            alias = str(row.get("alias", "")).strip().lower()
+            raw_key = str(row.get("raw_key", "")).strip().lower()
+            class_type = str(row.get("class_type", "")).strip()
+            input_name = str(row.get("input_name", "")).strip()
+            if not workflow_table or not alias or not raw_key:
+                continue
+            self._aliases[(workflow_table.lower(), alias)] = WorkflowBindingAliasSpec(
+                workflow_table=workflow_table,
+                alias=alias,
+                raw_key=raw_key,
+                class_type=class_type,
+                input_name=input_name,
+                is_primary=bool(row.get("is_primary", False)),
+                generated=bool(row.get("generated", True)),
+                created_at=float(row.get("created_at", 0.0)),
+                updated_at=float(row.get("updated_at", 0.0)),
+            )
+        self._loaded = True
+
+    def save(self) -> None:
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": REGISTRY_SCHEMA_VERSION,
+            "aliases": [
+                {
+                    "workflow_table": spec.workflow_table,
+                    "alias": spec.alias,
+                    "raw_key": spec.raw_key,
+                    "class_type": spec.class_type,
+                    "input_name": spec.input_name,
+                    "is_primary": spec.is_primary,
+                    "generated": spec.generated,
+                    "created_at": spec.created_at,
+                    "updated_at": spec.updated_at,
+                }
+                for spec in sorted(
+                    self._aliases.values(),
+                    key=lambda s: (s.workflow_table.lower(), s.alias.lower()),
+                )
+            ],
+        }
+        self.registry_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def replace_workflow(self, *, workflow_table: str, rows: list[WorkflowBindingAliasSpec]) -> None:
+        self.load()
+        wf = workflow_table.lower()
+        for key in list(self._aliases.keys()):
+            if key[0] == wf:
+                del self._aliases[key]
+        for spec in rows:
+            self._aliases[(wf, spec.alias.lower())] = spec
+        self.save()
+
+    def delete_workflow(self, workflow_table: str) -> None:
+        self.load()
+        wf = workflow_table.lower()
+        changed = False
+        for key in list(self._aliases.keys()):
+            if key[0] == wf:
+                del self._aliases[key]
+                changed = True
+        if changed:
+            self.save()
+
+    def get(self, *, workflow_table: str, alias: str) -> WorkflowBindingAliasSpec | None:
+        self.load()
+        return self._aliases.get((workflow_table.lower(), alias.lower()))
+
+    def list_for_workflow(self, workflow_table: str) -> list[WorkflowBindingAliasSpec]:
+        self.load()
+        wf = workflow_table.lower()
+        out = [spec for (w, _a), spec in self._aliases.items() if w == wf]
+        return sorted(out, key=lambda s: s.alias.lower())
+
 
 class QueryMacroRegistry:
     def __init__(self, registry_path: Path) -> None:
@@ -874,6 +1024,7 @@ class LocalComfySQLEngine:
         self.character_binding_registry = CharacterBindingRegistry(state_dir / "sql_character_bindings.json")
         self.asset_alias_registry = AssetAliasRegistry(state_dir / "sql_asset_aliases.json")
         self.workflow_slot_registry = WorkflowSlotRegistry(state_dir / "sql_workflow_slots.json")
+        self.workflow_binding_alias_registry = WorkflowBindingAliasRegistry(state_dir / "sql_binding_aliases.json")
         self.query_registry = QueryMacroRegistry(state_dir / "sql_queries.json")
         self._schema_store = None
         self._catalog = None
@@ -943,8 +1094,10 @@ class LocalComfySQLEngine:
             ) from exc
 
     def _list_models_inventory(self) -> list[dict[str, Any]]:
+        models_url = f"{self.comfy_base_url}/models"
         try:
-            categories = self._read_json("/models")
+            with urlopen_with_auth_fallback(models_url, method="GET", timeout=20.0) as resp:
+                categories = json.loads(resp.read().decode("utf-8"))
         except error.HTTPError as exc:
             if exc.code in {401, 403}:
                 return self._list_models_from_object_info()
@@ -959,10 +1112,15 @@ class LocalComfySQLEngine:
         for category in categories:
             if not isinstance(category, str):
                 continue
+            category_url = f"{self.comfy_base_url}/models/{category}"
             try:
-                payload = self._read_json(f"/models/{category}")
+                with urlopen_with_auth_fallback(category_url, method="GET", timeout=20.0) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
             except error.HTTPError as exc:
                 if exc.code == 404:
+                    continue
+                if exc.code in {401, 403}:
+                    # Some servers lock down specific model category endpoints.
                     continue
                 raise SQLEngineError(
                     f"Failed to read models for category '{category}': HTTP {exc.code}",
@@ -1201,6 +1359,21 @@ class LocalComfySQLEngine:
             raise SQLEngineError(f"Workflow file not found: {resolved}", exit_code=2)
         return resolved
 
+    def _managed_workflows_dir(self) -> Path:
+        path = (self.state_dir / "workflows").resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _materialize_workflow_copy(self, *, source_path: Path, table_name: str) -> Path:
+        suffix = source_path.suffix or ".json"
+        safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in table_name) or "workflow"
+        target = (self._managed_workflows_dir() / f"{safe_name}{suffix}").resolve()
+        try:
+            shutil.copy2(source_path, target)
+        except Exception as exc:
+            raise SQLEngineError(f"Failed to copy workflow into managed state folder: {exc}", exit_code=3) from exc
+        return target
+
     def execute_sql(
         self,
         sql: str,
@@ -1384,11 +1557,17 @@ class LocalComfySQLEngine:
             table_spec = self.registry.get(query.workflow_table)
             if table_spec is None:
                 raise SQLEngineError(f"Workflow table '{query.workflow_table}' does not exist.", exit_code=2)
+            prompt = self._load_workflow_as_api_prompt(Path(table_spec.workflow_path))
+            canonical_binding_key = self._resolve_workflow_binding_key(
+                workflow_table=table_spec.table,
+                prompt=prompt,
+                binding_key=query.binding_key,
+            )
             spec = self.workflow_slot_registry.upsert(
                 workflow_table=table_spec.table,
                 slot_name=query.slot_name,
                 slot_kind=query.slot_kind,
-                binding_key=query.binding_key,
+                binding_key=canonical_binding_key,
             )
             return {
                 "action": "create_slot",
@@ -1469,13 +1648,19 @@ class LocalComfySQLEngine:
             kind = str(getattr(query, "kind", "workflow") or "workflow").lower()
             if kind not in {"workflow", "template"}:
                 kind = "workflow"
+            managed_workflow_path = self._materialize_workflow_copy(
+                source_path=resolved,
+                table_name=query.table_name,
+            )
             spec = self.registry.create_table(
                 query.table_name,
-                resolved,
+                managed_workflow_path,
                 kind=kind,
                 default_params=default_params,
                 meta=self._extract_workflow_meta(resolved),
             )
+            alias_specs = self._generate_binding_alias_specs(workflow_table=spec.table, prompt=prompt)
+            self.workflow_binding_alias_registry.replace_workflow(workflow_table=spec.table, rows=alias_specs)
             result = {
                 "action": "create_template" if kind == "template" else "create_table",
                 "table": spec.table,
@@ -1490,9 +1675,22 @@ class LocalComfySQLEngine:
             return result
 
         if isinstance(query, DropTableQuery):
+            existing_spec = self.registry.get(query.table_name)
             dropped = self.registry.drop_table(query.table_name)
             if not dropped:
                 raise SQLEngineError(f"Table '{query.table_name}' does not exist.", exit_code=2)
+            self.workflow_slot_registry.delete_for_workflow(query.table_name)
+            self.character_binding_registry.delete_for_workflow(query.table_name)
+            self.preset_registry.delete_for_template(query.table_name)
+            self.workflow_binding_alias_registry.delete_workflow(query.table_name)
+            if existing_spec is not None:
+                try:
+                    managed_workflow_path = Path(existing_spec.workflow_path).resolve()
+                    managed_root = self._managed_workflows_dir().resolve()
+                    if managed_workflow_path.exists() and managed_root in managed_workflow_path.parents:
+                        managed_workflow_path.unlink()
+                except Exception:
+                    pass
             return {"action": "drop_table", "table": query.table_name}
 
         if isinstance(query, SetMetaQuery):
@@ -1684,7 +1882,10 @@ class LocalComfySQLEngine:
             workflow_spec = self.registry.get(query.target)
             if workflow_spec is not None:
                 prompt = self._load_workflow_as_api_prompt(Path(workflow_spec.workflow_path))
-                bindable, ambiguous = self._workflow_bindable_fields(prompt)
+                bindable, ambiguous = self._workflow_bindable_fields(
+                    workflow_table=workflow_spec.table,
+                    prompt=prompt,
+                )
                 return {
                     "action": "describe",
                     "kind": workflow_spec.kind,
@@ -1722,11 +1923,19 @@ class LocalComfySQLEngine:
                     if class_type.lower() == lowered:
                         target = class_type
                         break
+            try:
+                node_schema = schema.describe_table(target)
+            except KeyError as exc:
+                raise SQLEngineError(
+                    f"Unknown table/node '{query.target}'. "
+                    "Use `SHOW TABLES;` to inspect available workflows, templates, and nodes.",
+                    exit_code=2,
+                ) from exc
             return {
                 "action": "describe",
                 "kind": "node",
                 "table": target,
-                "schema": schema.describe_table(target),
+                "schema": node_schema,
             }
 
         if isinstance(query, SelectQuery):
@@ -2384,7 +2593,7 @@ class LocalComfySQLEngine:
         prefixes: list[str],
         output_dir: Path,
         timeout: float,
-        max_files_per_prefix: int = 8,
+        max_files_per_prefix: int = 1,
     ) -> dict[str, Any]:
         if not prefixes:
             return {"downloaded": [], "failed": []}
@@ -2675,7 +2884,7 @@ class LocalComfySQLEngine:
             )
         raise SQLEngineError(
             f"Character '{character_name}' does not exist. "
-            f"Bind it first with `comfy-agent bind-character --workflow {table_name} --character {character_name} --image <file>`.",
+            f"Bind it first with `comfysql bind-character --workflow {table_name} --character {character_name} --image <file>`.",
             exit_code=2,
         )
 
@@ -3033,31 +3242,143 @@ class LocalComfySQLEngine:
 
         return self._validate_api_prompt_shape(out)
 
-    def _workflow_bindable_fields(self, prompt: dict[str, Any]) -> tuple[list[str], list[str]]:
-        occurrences: dict[str, int] = {}
-        fields: list[str] = []
-        class_occurrences: dict[tuple[str, str], int] = {}
+    def _sorted_prompt_nodes(self, prompt: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        items: list[tuple[str, dict[str, Any]]] = [
+            (str(node_id), node)
+            for node_id, node in prompt.items()
+            if isinstance(node, dict)
+        ]
+        return sorted(items, key=lambda pair: (0, int(pair[0])) if pair[0].isdigit() else (1, pair[0]))
+
+    def _build_workflow_key_indexes(
+        self,
+        prompt: dict[str, Any],
+    ) -> tuple[dict[str, list[tuple[str, str]]], dict[tuple[str, str], str], dict[tuple[str, str], list[tuple[str, str]]]]:
+        simple_key_index: dict[str, list[tuple[str, str]]] = {}
+        class_type_index: dict[tuple[str, str], str] = {}
+        class_input_index: dict[tuple[str, str], list[tuple[str, str]]] = {}
         for node_id, node in prompt.items():
-            if not isinstance(node, dict):
-                continue
             inputs = node.get("inputs", {})
             class_type = str(node.get("class_type", ""))
             if not isinstance(inputs, dict):
                 continue
+            for key in inputs.keys():
+                simple_key_index.setdefault(str(key), []).append((str(node_id), str(key)))
+                class_type_index[(str(node_id), str(key))] = class_type
+                if class_type:
+                    class_input_index.setdefault((class_type.lower(), str(key)), []).append((str(node_id), str(key)))
+        return simple_key_index, class_type_index, class_input_index
+
+    def _generate_binding_alias_specs(self, *, workflow_table: str, prompt: dict[str, Any]) -> list[WorkflowBindingAliasSpec]:
+        now = time.time()
+        used_aliases: set[str] = set()
+        specs: list[WorkflowBindingAliasSpec] = []
+        counters: dict[str, int] = {}
+
+        def register_alias(base: str, *, node_id: str, class_type: str, input_name: str) -> None:
+            alias = base
+            suffix = 2
+            while alias in used_aliases:
+                alias = f"{base}_{suffix}"
+                suffix += 1
+            used_aliases.add(alias)
+            specs.append(
+                WorkflowBindingAliasSpec(
+                    workflow_table=workflow_table,
+                    alias=alias,
+                    raw_key=f"{node_id}.{input_name}".lower(),
+                    class_type=class_type,
+                    input_name=input_name,
+                    is_primary=(alias == base),
+                    generated=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        for node_id, node in self._sorted_prompt_nodes(prompt):
+            inputs = node.get("inputs", {})
+            class_type = str(node.get("class_type", ""))
+            class_key = class_type.lower()
+            if not isinstance(inputs, dict):
+                continue
+
+            if class_key == "loadimage" and "image" in inputs:
+                idx = counters.get("loadimage", 0) + 1
+                counters["loadimage"] = idx
+                if idx == 1:
+                    base = "subject_image"
+                elif idx == 2:
+                    base = "reference_image"
+                else:
+                    base = f"reference_image_{idx - 1}"
+                register_alias(base, node_id=node_id, class_type=class_type, input_name="image")
+
+            if class_key == "cliptextencode" and "text" in inputs:
+                idx = counters.get("cliptextencode_text", 0) + 1
+                counters["cliptextencode_text"] = idx
+                if idx == 1:
+                    base = "prompt"
+                elif idx == 2:
+                    base = "negative_prompt"
+                else:
+                    base = f"prompt_{idx - 1}"
+                register_alias(base, node_id=node_id, class_type=class_type, input_name="text")
+
+            if class_key in {"ksampler", "ksampleradvanced"}:
+                for input_name in ("seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"):
+                    if input_name in inputs:
+                        register_alias(input_name, node_id=node_id, class_type=class_type, input_name=input_name)
+
+            if class_key in {"emptylatentimage", "emptysd3latentimage", "emptysdxllatentimage"}:
+                for input_name in ("width", "height", "batch_size"):
+                    if input_name in inputs:
+                        register_alias(input_name, node_id=node_id, class_type=class_type, input_name=input_name)
+
+            if class_key == "saveimage" and "filename_prefix" in inputs:
+                register_alias("filename_prefix", node_id=node_id, class_type=class_type, input_name="filename_prefix")
+
+            for input_name in ("ckpt_name", "unet_name", "clip_name", "vae_name"):
+                if input_name in inputs:
+                    register_alias(input_name, node_id=node_id, class_type=class_type, input_name=input_name)
+
+        return specs
+
+    def _ensure_workflow_binding_aliases(self, *, workflow_table: str, prompt: dict[str, Any]) -> list[WorkflowBindingAliasSpec]:
+        existing = self.workflow_binding_alias_registry.list_for_workflow(workflow_table)
+        if existing:
+            return existing
+        generated = self._generate_binding_alias_specs(workflow_table=workflow_table, prompt=prompt)
+        self.workflow_binding_alias_registry.replace_workflow(workflow_table=workflow_table, rows=generated)
+        return generated
+
+    def _workflow_bindable_fields(self, *, workflow_table: str, prompt: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+        occurrences: dict[str, int] = {}
+        for _node_id, node in prompt.items():
+            if not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs", {})
+            if not isinstance(inputs, dict):
+                continue
             for key, value in inputs.items():
-                # Skip connection references in generic field list.
                 if isinstance(value, list) and len(value) == 2:
                     continue
-                occurrences[key] = occurrences.get(key, 0) + 1
-                fields.append(f"{node_id}.{key}")
-                if class_type:
-                    class_key = (class_type.lower(), str(key))
-                    class_occurrences[class_key] = class_occurrences.get(class_key, 0) + 1
-                    if class_occurrences[class_key] == 1:
-                        fields.append(f"{class_type}.{key}")
-        unique_fields = sorted({k for k, count in occurrences.items() if count == 1})
+                occurrences[str(key)] = occurrences.get(str(key), 0) + 1
+
         ambiguous_fields = sorted({k for k, count in occurrences.items() if count > 1})
-        return sorted(set(fields + unique_fields)), ambiguous_fields
+        aliases = self._ensure_workflow_binding_aliases(workflow_table=workflow_table, prompt=prompt)
+        bindable_fields = [
+            {
+                "alias": spec.alias,
+                "raw_key": spec.raw_key,
+                "class_type": spec.class_type,
+                "input_name": spec.input_name,
+                "is_primary": spec.is_primary,
+                "generated": spec.generated,
+            }
+            for spec in aliases
+        ]
+        return bindable_fields, ambiguous_fields
 
     def _compile_workflow_table(self, *, table_spec: WorkflowTableSpec, where: dict[str, Any]) -> dict[str, Any]:
         return self._compile_workflow_table_with_alias(table_spec=table_spec, where=where, source_alias=None)
@@ -3071,24 +3392,17 @@ class LocalComfySQLEngine:
     ) -> dict[str, Any]:
         prompt = self._load_workflow_as_api_prompt(Path(table_spec.workflow_path))
         patched = json.loads(json.dumps(prompt))
-
-        simple_key_index: dict[str, list[tuple[str, str]]] = {}
-        class_type_index: dict[tuple[str, str], str] = {}
-        class_input_index: dict[tuple[str, str], list[tuple[str, str]]] = {}
-        for node_id, node in patched.items():
-            inputs = node.get("inputs", {})
-            class_type = str(node.get("class_type", ""))
-            if not isinstance(inputs, dict):
-                continue
-            for key in inputs.keys():
-                simple_key_index.setdefault(str(key), []).append((str(node_id), str(key)))
-                class_type_index[(str(node_id), str(key))] = class_type
-                if class_type:
-                    class_input_index.setdefault((class_type.lower(), str(key)), []).append((str(node_id), str(key)))
+        simple_key_index, class_type_index, class_input_index = self._build_workflow_key_indexes(patched)
+        alias_specs = self._ensure_workflow_binding_aliases(workflow_table=table_spec.table, prompt=patched)
+        alias_map = {spec.alias.lower(): spec.raw_key.lower() for spec in alias_specs}
 
         for key, value in where.items():
             raw_key = str(key)
             normalized_key = self._strip_source_prefix(raw_key, table_name=table_spec.table, source_alias=source_alias)
+            if "." not in normalized_key and normalized_key not in simple_key_index:
+                alias_raw = alias_map.get(normalized_key.lower())
+                if alias_raw:
+                    normalized_key = alias_raw
             if "." in normalized_key:
                 left, input_name = normalized_key.split(".", 1)
                 node_payload = patched.get(left)
@@ -3197,6 +3511,46 @@ class LocalComfySQLEngine:
         if first.lower() == table_name.lower():
             return rest
         return key
+
+    def _resolve_workflow_binding_key(self, *, workflow_table: str, prompt: dict[str, Any], binding_key: str) -> str:
+        normalized = str(binding_key or "").strip().lower()
+        if not normalized:
+            raise SQLEngineError("Slot binding key cannot be empty.", exit_code=2)
+
+        simple_key_index, _class_type_index, _class_input_index = self._build_workflow_key_indexes(prompt)
+        if "." in normalized:
+            node_id, input_name = normalized.split(".", 1)
+            node = prompt.get(node_id)
+            if isinstance(node, dict):
+                inputs = node.get("inputs", {})
+                if isinstance(inputs, dict) and input_name in inputs:
+                    return normalized
+            raise SQLEngineError(
+                f"Unknown workflow binding '{binding_key}' for workflow '{workflow_table}'. "
+                "Use DESCRIBE WORKFLOW to see bindable fields.",
+                exit_code=2,
+            )
+
+        self._ensure_workflow_binding_aliases(workflow_table=workflow_table, prompt=prompt)
+        alias_spec = self.workflow_binding_alias_registry.get(workflow_table=workflow_table, alias=normalized)
+        if alias_spec is not None:
+            return alias_spec.raw_key.lower()
+
+        candidates = simple_key_index.get(normalized, [])
+        if len(candidates) == 1:
+            node_id, input_name = candidates[0]
+            return f"{node_id}.{input_name}".lower()
+        if len(candidates) > 1:
+            raise SQLEngineError(
+                f"Ambiguous workflow binding '{binding_key}' for workflow '{workflow_table}'. "
+                "Use alias name or node_id.input_name form.",
+                exit_code=2,
+            )
+        raise SQLEngineError(
+            f"Unknown workflow binding '{binding_key}' for workflow '{workflow_table}'. "
+            "Use DESCRIBE WORKFLOW to see bindable fields.",
+            exit_code=2,
+        )
 
     def _semantic_targets(
         self,
