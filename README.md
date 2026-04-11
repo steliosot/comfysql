@@ -26,8 +26,9 @@ python -m pip install --upgrade "git+https://github.com/steliosot/comfysql.git"
 
 ## Start Here
 
-- Beginner tutorial: [STARTERS.md](/Users/stelios/Downloads/ComfyUI-custom/STARTERS.md)
-- Full command reference: [COMMANDS.md](/Users/stelios/Downloads/ComfyUI-custom/COMMANDS.md)
+- Installation guide: [INSTALL.md](INSTALL.md)
+- Beginner tutorial: [STARTERS.md](STARTERS.md)
+- Full command reference: [COMMANDS.md](COMMANDS.md)
 
 ## Quick Use
 
@@ -69,4 +70,4 @@ WHERE prompt='cinematic portrait of Betts wearing a summer hat walking in centra
 
 Automation and reusable run packs are in `openclaw/`.
 
-- Skill index: [openclaw/OPENCLAW.md](/Users/stelios/Downloads/ComfyUI-custom/openclaw/OPENCLAW.md)
+- Skill index: [openclaw/OPENCLAW.md](openclaw/OPENCLAW.md)
