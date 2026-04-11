@@ -2,6 +2,13 @@
 
 ComfySQL is a SQL-style layer on top of ComfyUI.
 
+```ASN.1
+▄▖     ▐▘  ▄▖▄▖▖ 
+▌ ▛▌▛▛▌▜▘▌▌▚ ▌▌▌ 
+▙▖▙▌▌▌▌▐ ▙▌▄▌█▌▙▖
+         ▄▌   ▘  
+```
+
 Goal: make it easy to mix and match:
 
 - workflows
@@ -15,7 +22,7 @@ Then you use SQL commands to run and reuse them faster.
 
 ## Start Here
 
-- Beginner flow: [STARTERS.md](/Users/stelios/Downloads/ComfyUI-custom/STARTERS.md)
+- Beginner tutorial: [STARTERS.md](/Users/stelios/Downloads/ComfyUI-custom/STARTERS.md)
 - Full command reference: [COMMANDS.md](/Users/stelios/Downloads/ComfyUI-custom/COMMANDS.md)
 
 ## Quick Use
@@ -26,17 +33,18 @@ Open SQL terminal:
 comfysql sql remote
 ```
 
-Typical run:
+**A typical run with an existing character (Matt) wearing an object (hat), using a preconfigured profile (50mm lens).**
 
 ```sql
 SELECT image
-FROM txt2img_empty_latent
-USING default_run
-PROFILE goldenhour_backlight
-WHERE prompt='cinematic portrait in central London at sunset'
-  AND seed=123
-  AND filename_prefix='txt2img_london_123';
+FROM img2img_2_inputs
+CHARACTER char_matt
+OBJECT obj_hat
+PROFILE lens_50mm
+WHERE prompt='cinematic portrait of Matt wearing a summer hat walking in central London in the Trafalgar Square';
 ```
+
+![matt_gen](output/matt_gen.png)
 
 If you use local images, place them in `input/assets` and copy to server:
 
