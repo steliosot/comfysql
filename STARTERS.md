@@ -29,7 +29,7 @@ For one-line SQL, semicolon is optional. For multiline SQL, always end the state
 Your input folder for local assets is:
 
 ```bash
-/input/assets
+input/assets
 ```
 
 After placing an image locally, you must explicitly copy it to the server input. Run this in the terminal (not the SQL terminal):
@@ -267,7 +267,7 @@ Create a template:
 
 ```sql
 CREATE TEMPLATE txt2img_starter_template 
-AS WORKFLOW '/Users/stelios/Downloads/ComfyUI-custom/input/workflows/txt2img_empty_latent.json';
+AS WORKFLOW 'input/workflows/txt2img_empty_latent.json';
 ```
 
 Using a template, you can create different presets.

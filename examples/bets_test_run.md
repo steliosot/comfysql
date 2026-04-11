@@ -6,7 +6,7 @@
 - Table: `img2img_controlnet`
 - Preset: `char_bets`
 - Profile: `goldenhour_backlight`
-- API Prompt: `/Users/stelios/Downloads/ComfyUI-custom/.state/sql_runs/run_1775900254/statement_001_api_prompt.json`
+- API Prompt: `.state/sql_runs/run_1775900254/statement_001_api_prompt.json`
 - Downloaded Outputs: `0`
 
 ## SQL
@@ -46,7 +46,7 @@ No images were available.
       }
     ]
   },
-  "api_prompt_path": "/Users/stelios/Downloads/ComfyUI-custom/.state/sql_runs/run_1775900254/statement_001_api_prompt.json",
+  "api_prompt_path": ".state/sql_runs/run_1775900254/statement_001_api_prompt.json",
   "upload_preflight": {
     "uploaded_count": 0,
     "skipped_existing_count": 1,
@@ -57,7 +57,7 @@ No images were available.
         "node_id": "11",
         "class_type": "LoadImage",
         "input_name": "image",
-        "local_path": "/Users/stelios/Downloads/ComfyUI-custom/input/assets/bets.png",
+        "local_path": "input/assets/bets.png",
         "remote_path": "bets.png"
       }
     ],
@@ -67,7 +67,7 @@ No images were available.
         "node_id": "11",
         "class_type": "LoadImage",
         "input_name": "image",
-        "local_path": "/Users/stelios/Downloads/ComfyUI-custom/input/assets/bets.png",
+        "local_path": "input/assets/bets.png",
         "remote_path": "bets.png",
         "status": "skipped_existing"
       }

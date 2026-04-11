@@ -6,7 +6,7 @@
 - Table: `img2img_controlnet`
 - Character: `char_bets`
 - Profile: `goldenhour_backlight`
-- API Prompt: `/Users/stelios/Downloads/ComfyUI-custom/.state/sql_runs/run_1775901758/statement_001_api_prompt.json`
+- API Prompt: `.state/sql_runs/run_1775901758/statement_001_api_prompt.json`
 - Downloaded Outputs: `0`
 
 ## SQL
@@ -294,7 +294,7 @@ No images were available.
       }
     ]
   },
-  "api_prompt_path": "/Users/stelios/Downloads/ComfyUI-custom/.state/sql_runs/run_1775901758/statement_001_api_prompt.json",
+  "api_prompt_path": ".state/sql_runs/run_1775901758/statement_001_api_prompt.json",
   "resolved_layers": {
     "preset": "",
     "character": "char_bets",
