@@ -23,11 +23,6 @@ ComfySQL is a SQL-style layer on top of ComfyUI. Its goal is to make it easy to 
 - [Contributing Guide](CONTRIBUTING.md)
 - [License](LICENSE)
 
-## Credits
-
-- Built on top of [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-- Additional inspiration/tools from [Pixaroma](https://github.com/pixaroma)
-
 ## Quick Install
 
 ```bash
@@ -92,3 +87,5 @@ WHERE prompt='cinematic portrait of Betts wearing a summer hat walking in centra
 Automation and reusable run packs are in `openclaw/`.
 
 - Skill index: [openclaw/OPENCLAW.md](openclaw/OPENCLAW.md)
+
+<sub>Built on top of <a href="https://github.com/comfyanonymous/ComfyUI">ComfyUI</a>. Additional inspiration/tools from <a href="https://github.com/pixaroma">Pixaroma</a>.</sub>
