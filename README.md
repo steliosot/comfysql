@@ -17,6 +17,12 @@ ComfySQL is a SQL-style layer on top of ComfyUI. Its goal is to make it easy to 
 - Website: use this repository README/docs (or set your project website in GitHub Settings if you have one).
 - Suggested topics: `comfyui`, `sql`, `image-generation`, `automation`, `workflow`, `python`, `cli`.
 
+## Project Standards
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [License](LICENSE)
+
 ## Quick Install
 
 ```bash
