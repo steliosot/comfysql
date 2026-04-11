@@ -20,7 +20,7 @@ Open SQL terminal:
 comfysql sql remote
 ```
 
-**A typical run with an existing character (Matt) wearing an object (hat), using a preconfigured profile (50mm lens).**
+A typical run with an existing character (Matt) wearing an object (hat), using a preconfigured profile (50mm lens):
 
 ```sql
 SELECT image
@@ -28,25 +28,25 @@ FROM img2img_2_inputs
 CHARACTER char_matt
 OBJECT obj_hat
 PROFILE lens_50mm
-WHERE prompt='cinematic portrait of Matt wearing a summer hat walking in central London in the Trafalgar Square';
+WHERE prompt='cinematic portrait of Matt wearing a summer hat walking in central London';
 ```
 
-![matt_gen](output/matt_gen.png)
+**ComfySQL customizes your ComfyUI workflows with characters, objects, shooting profiles, and configurations, making production easy and reproducible at scale.**
 
-If you use local images, place them in `input/assets` and copy to server:
+![Group 6](output/matt_gen_group.png)
 
-```bash
-comfysql copy-assets remote --all
+So you can keep customizing as you like.
+
+```sql
+SELECT image
+FROM img2img_2_inputs
+CHARACTER char_bets
+OBJECT obj_hat
+PROFILE lens_50mm
+WHERE prompt='cinematic portrait of Betts wearing a summer hat walking in central London';
 ```
 
-Compatibility alias:
-
-- `comfy-agent` remains fully supported and runs the same CLI.
-
-CLI UX:
-
-- Colors/styles appear automatically in interactive terminals.
-- On known failures, CLI now adds a short `hint:` line with the next command to try.
+![bets_gen](output/bets_gen.png)
 
 ## OpenClaw Skills
 
