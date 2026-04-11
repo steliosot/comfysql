@@ -1,7 +1,3 @@
-# ComfySQL
-
-ComfySQL is a SQL-style layer on top of ComfyUI.
-
 ```ASN.1
 ▄▖     ▐▘  ▄▖▄▖▖ 
 ▌ ▛▌▛▛▌▜▘▌▌▚ ▌▌▌ 
@@ -9,16 +5,7 @@ ComfySQL is a SQL-style layer on top of ComfyUI.
          ▄▌   ▘  
 ```
 
-Goal: make it easy to mix and match:
-
-- workflows
-- models
-- presets (technical run settings)
-- profiles (style/camera/composition settings)
-- reusable assets (`CHARACTER` / `OBJECT`)
-
-ComfySQL assumes your workflows already work in ComfyUI.  
-Then you use SQL commands to run and reuse them faster.
+ComfySQL is a SQL-style layer on top of ComfyUI. Its goal is to make it easy to mix and match complex configurations.
 
 ## Start Here
 
