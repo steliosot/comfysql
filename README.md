@@ -5,7 +5,17 @@
          ▄▌   ▘  
 ```
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests)
+
 ComfySQL is a SQL-style layer on top of ComfyUI. Its goal is to make it easy to mix and match complex configurations.
+
+## About
+
+- Description: SQL-first workflow orchestration layer for ComfyUI (workflows, presets, profiles, characters, objects).
+- Website: use this repository README/docs (or set your project website in GitHub Settings if you have one).
+- Suggested topics: `comfyui`, `sql`, `image-generation`, `automation`, `workflow`, `python`, `cli`.
 
 ## Quick Install
 
